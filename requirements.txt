@@ -1,0 +1,12 @@
+# For quickstart/:
+#   pip install -r requirements.txt
+
+zeroruntime-teleops
+python-dotenv
+opencv-python
+
+# For so101/:
+#   pip install "zeroruntime-teleops[lerobot]"
+#
+# For inference/:
+#   pip install "zeroruntime-teleops[lerobot]" "lerobot[smolvla]"
