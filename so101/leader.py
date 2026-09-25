@@ -34,7 +34,7 @@ from config import (FPS, MEETING_ID, TOKEN, calibration_id, device,
 
 #: Don't arm until the two arms are this close. None arms immediately,
 #: and the follower then travels to the leader's pose at full slew.
-ALIGN = 8.0
+ALIGN = NONE
 
 #: Bounded, or a gate that never opens reads as a hang.
 ALIGN_TIMEOUT_S = 120.0

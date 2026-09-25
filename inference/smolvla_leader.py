@@ -40,7 +40,7 @@ HERE = Path(__file__).resolve().parent
 
 #: Don't arm until the arm is this close to the policy's first output.
 #: None arms immediately. See the README.
-ALIGN = 8.0
+ALIGN = NONE
 
 #: Bounded, or a gate that never opens reads as a hang.
 ALIGN_TIMEOUT_S = 60.0

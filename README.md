@@ -23,10 +23,10 @@ follower, and does not know a policy is driving it.
 
  For running the `quickstart/`.
 ```bash
-git clone <this repo> && cd zrt_robotics_example
+git clone https://github.com/ZeroRuntimeAI/zrt-teleops-examples.git && cd zrt-teleops-examples
 
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 
 pip install -r requirements.txt
 ```
@@ -43,9 +43,12 @@ For `inference/`, add SmolVLA on top of that:
 pip install "lerobot[smolvla]"
 ```
 
-Keep the quotes around the brackets. `so101/` and `inference/` need
-Python 3.12 or newer. Linux and macOS only — there is no Windows build
-of the SDK.
+`so101/` and `inference/` need Python 3.12 or newer.
+
+| OS    | Architecture     |
+|-------|------------------|
+| Linux | x86_64, aarch64  |
+| macOS | arm64    |
 
 
 ## Credentials
