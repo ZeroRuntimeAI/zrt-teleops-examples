@@ -1,0 +1,8 @@
+so101_new_calib.urdf and so101_leader_new_calib.urdf are copied unmodified from
+TheRobotStudio/SO-ARM100 (https://github.com/TheRobotStudio/SO-ARM100),
+Simulation/SO101/, at commit 5f6d2b876a53a4872e405b991dd925556c9e38a4.
+
+They are licensed under the Apache License, Version 2.0; a copy is in LICENSE
+next to this file. The STL meshes they reference (assets/*.stl) are not copied.
+
+so101.urdf.xacro is part of this repository and only includes them.

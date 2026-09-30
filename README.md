@@ -8,6 +8,7 @@ room in between carries the video one way and the actions the other.
 | [`quickstart/`](quickstart/) | a room id and a token | both ends of a real session, with no arm on either end |
 | [`so101/`](so101/) | two SO-101 arms, lerobot, two hosts | driving a real arm from a real arm, over the internet |
 | [`inference/`](inference/) | one SO-101, plus a SmolVLA checkpoint | a policy driving the arm instead of a person |
+| [`ros2/`](ros2/) | two SO-101 arms, ROS 2 Jazzy on Ubuntu 24.04 | the `so101/` session with ros2_control on each arm |
 
 Start with `quickstart/` whatever hardware you have. It is the same session a
 real rig runs, minus the servos, so it is the fastest way to find out whether
@@ -16,7 +17,8 @@ your token, your room and your network are right before an arm is involved.
 The three build on each other. `so101/` swaps the fake arm for a real one
 and changes nothing else; `inference/` swaps the human for a model and
 changes nothing on the robot side at all — its follower is the same
-follower, and does not know a policy is driving it.
+follower, and does not know a policy is driving it. `ros2/` is `so101/`
+with each arm behind ros2_control instead of lerobot.
 
 ## Install
 
@@ -45,6 +47,13 @@ pip install "lerobot[smolvla]"
 
 `so101/` and `inference/` need Python 3.12 or newer.
 
+For `ros2/`, install into the Python ROS 2 Jazzy uses, not this venv —
+[`ros2/README.md`](ros2/README.md#needs) has the details:
+
+```bash
+pip install "zeroruntime-teleops[ros2]"
+```
+
 | OS    | Architecture     |
 |-------|------------------|
 | Linux | x86_64, aarch64  |
@@ -67,7 +76,9 @@ The scripts load `.env` from their own directory, so there is nothing to
 set in your shell wins over the file. `.env` is gitignored — a room token is
 a bearer credential.
 
-The two every example needs are `ZRT_TOKEN` and `ZRT_MEETING_ID`, and both
+The two every example needs are `ZRT_TOKEN` and `ZRT_MEETING_ID` (in
+`ros2/`, the SDK's own `ZERORUNTIME_AUTH_TOKEN` and
+`ZERORUNTIME_MEETING_ID`, since the ROS node reads them itself), and both
 ends of a session must use the same room id.
 
 Other settings live at the top of each script — open the file and edit

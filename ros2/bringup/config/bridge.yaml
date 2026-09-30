@@ -1,0 +1,52 @@
+# Parameters for the zeroruntime bridge node, both roles. Each role ignores
+# the keys meant for the other. The launch files pass this with --params-file
+# and add robot_id from the command line.
+#
+# The token and room id are NOT here: the node reads ZERORUNTIME_AUTH_TOKEN
+# and ZERORUNTIME_MEETING_ID from the environment (env.sh loads them from
+# .env), so nothing secret ends up in a file you might commit.
+/**:
+  ros__parameters:
+    # Order is a contract twice over: both machines must list the same joints
+    # in the same order, and the follower's forward_controller.joints in
+    # follower_controllers.yaml must match it too.
+    joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper]
+
+    # Each machine normalises against its OWN arm's lerobot calibration,
+    # found by robot_id under ~/.cache/huggingface/lerobot/calibration.
+    # Set calibration_file instead to point at a JSON directly.
+    calibration_profile: lerobot_so101_rad
+
+    leader_states_topic: /leader/joint_states
+    follower_states_topic: /follower/joint_states
+    follower_commands_topic: /follower/forward_controller/commands
+
+    # Keep equal to update_rate in the *_controllers.yaml files.
+    control_hz: 200
+
+    # Refuse to arm while the two arms disagree by more than this on any
+    # joint (in the node's normalised units; 0.05 is the SDK default).
+    # 0.0 turns the check off -- then the follower jumps to wherever the
+    # leader is the moment you arm.
+    max_misalignment: 0.05
+
+    # Follower slew limit: the most a joint may move per 5 ms tick, as a
+    # fraction of its full calibrated travel. 200 Hz x 0.00375 = 0.75 full
+    # travels per second, the same glide as the lerobot SO-101 path. Raise it
+    # for less lag behind the leader, at the cost of harder lunges.
+    max_norm_step: 0.00375
+
+    # Follower only: cameras, sent to the leader as video. One label per
+    # handle. Handles must be strings: /dev/video* or /dev/v4l/by-path/...
+    # paths, or QUOTED indices like ['0', '2'] -- an unquoted [0, 2] is an
+    # integer array and the node refuses it at startup.
+    # camera_handles: [/dev/video0, /dev/video2]
+    # camera_labels: [front, wrist]
+    # camera_width: 640
+    # camera_height: 480
+    # camera_fps: 30
+
+    # Follower only: where `record_on` writes, and the task text stored
+    # with each episode.
+    # recording_dir: ./sessions
+    # episode_task: pick up the cube
