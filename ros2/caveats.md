@@ -12,13 +12,20 @@ down ros2_control, the driver deactivates and writes torque off to every
 servo, and the arm falls. Support it first. The leader has no torque, so
 nothing drops there. *(to confirm on hardware)*
 
-**Middle pose reads ~3.14 rad, `arm` refused as misaligned.** Driver 0.2.2
-reports `raw - offset` in radians with `offset` defaulting to 0, and
-`lerobot-calibrate` homed the servos so the middle pose reads ~2048 raw. The
-URDF sets `offset` 2048 on every joint so that pose is 0 rad; keep it if you
-edit the URDF. Never set `max_misalignment` to 0 on real hardware to get past
-the refusal: the follower would jump to wherever the leader is. *(to confirm
-on hardware)*
+**Middle pose reads ~3.14 rad.** Driver 0.2.2 reports `raw - offset` in
+radians with `offset` defaulting to 0, and `lerobot-calibrate` homed the
+servos so the middle pose reads ~2048 raw. The URDF sets `offset` 2048 on
+every joint so that pose is 0 rad; keep it if you edit the URDF. Check
+`ros2 topic echo /leader/joint_states --once` near the middle pose before the
+first `arm`: with `max_misalignment` 0.0 (the default here) nothing refuses
+to arm, so a wrong offset sends the follower to a wrong pose instead.
+Verified on hardware: both arms read inside their calibrated ranges.
+
+**`arm` moves the follower straight away.** `max_misalignment` 0.0 skips the
+alignment check: the follower travels from wherever it is to the leader's
+pose, at the slew limit (a full sweep in ~1.3 s). Keep the space around the
+follower clear when you arm, or set `max_misalignment` > 0 to make `arm`
+wait until the arms match.
 
 **`joint_config_file` / `homing_offset` does nothing.** The apt driver
 (0.2.2) reads only `usb_port` and per-joint `id` and `offset`. Newer source
@@ -35,6 +42,14 @@ less lag, lower it for gentler lunges after a stall.
 `forward_controller`'s joint *i*, and the controller checks only the length.
 Its `joints` must equal `joint_names` in `bridge.yaml`, in order;
 `follower.launch.py` refuses to start otherwise.
+
+**The follower stops taking commands after one bad message.** A command with
+the wrong number of values (say, a hand-typed `ros2 topic pub` with 3) makes
+ros2_control *deactivate* `forward_controller` ("Deactivating controllers …
+as their update resulted in an error"), seen on Jazzy ros2_control 4.48. The
+arm holds, but every later command is ignored, the bridge's included. Bring it
+back with `ros2 control switch_controllers -c /follower/controller_manager
+--activate forward_controller`. The bridge always sends all joints.
 
 **The link drops and the follower keeps still.** `forward_command_controller`
 has no timeout; it holds the last command forever. The SDK's watchdog

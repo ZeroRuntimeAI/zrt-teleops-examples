@@ -120,9 +120,11 @@ follower_estop   # latch an e-stop from this side
 clear_estop      # only here, on purpose: whoever can see the arm clears it
 ```
 
-`arm` is refused while the arms disagree by more than `max_misalignment` in
-`bridge.yaml`; the refusal names the worst joint. Move the leader toward the
-follower's pose and `arm` again.
+`arm` takes control straight away: the follower travels to the leader's
+pose at the slew limit (`max_norm_step`, a full sweep in ~1.3 s), so no manual
+lining up. To require the arms to match first, set `max_misalignment` in
+`bridge.yaml` (0.05 = 5 % of travel); `arm` is then refused while any joint
+differs by more, and the refusal names the joint.
 
 Ctrl-c stops only the bridge; the arm stack keeps running, and the follower
 holds its last position. `follower_up` again reuses it. To stop the stack:
@@ -166,9 +168,7 @@ arm
 `watch_follower` prints six numbers per message once armed, and they
 follow `fake_leader`. The bridge still needs a calibration to normalise
 against, so `ZRT_LEADER_ID` / `ZRT_FOLLOWER_ID` must name a real JSON on
-that machine. If `arm` is refused as misaligned, the mock follower sits at
-0 rad: try another `fake_leader` value, or `leader_mock -p
-max_misalignment:=0.0` for this test only.
+that machine.
 
 ## Troubleshooting
 
@@ -180,14 +180,17 @@ not up, or a name is off. `ros2 control list_controllers -c
 `/follower/forward_controller/commands`. The stack's own output is in
 `.run/<role>_arm.log`.
 
-**`arm` is refused.** Misaligned: read the message, move the leader. To see
+**`arm` is refused as misaligned.** Only with `max_misalignment` > 0: read
+the message, move the leader. To see
 where the follower is from the leader machine: `ros2 topic echo
 /leader/zrt_teleop_bridge/remote/follower_states`.
 
 **The follower does not move, and `forward_controller` logs a size
-error.** Its `joints` in `follower_controllers.yaml` and `joint_names` in
-`bridge.yaml` must be the same list in the same order; the launch file
-refuses to start otherwise.
+error.** A command of the wrong length deactivates the controller, and it
+stays off: `ros2 control switch_controllers -c /follower/controller_manager
+--activate forward_controller`. Its `joints` in `follower_controllers.yaml`
+and `joint_names` in `bridge.yaml` must be the same list in the same order;
+the launch file refuses to start otherwise.
 
 **Read errors from the driver, or `ros2 topic hz /follower/joint_states`
 well under 200.** The servo bus is not keeping up. Lower `update_rate` in

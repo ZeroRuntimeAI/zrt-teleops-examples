@@ -66,7 +66,10 @@ episode_off() { ros2 service call /follower$_bridge/episode std_srvs/srv/SetBool
 # -- plumbing ------------------------------------------------------------------
 # The stack's pidfile holds its process group id (setsid makes it the leader).
 _arm_pid()   { cat "$_run/$1_arm.pid" 2>/dev/null; }
-_arm_alive() { local p; p="$(_arm_pid "$1")" && [ -n "$p" ] && kill -0 -- "-$p" 2>/dev/null; }
+# A launch that died leaves a zombie, and its group still answers kill -0.
+_arm_alive() { local p; p="$(_arm_pid "$1")" && [ -n "$p" ] \
+                   && kill -0 -- "-$p" 2>/dev/null \
+                   && [ "$(ps -o state= -p "$p" 2>/dev/null)" != Z ]; }
 
 # _arm_up ROLE CONTROLLER [launch args]: start ROLE's stack unless it is
 # running, then wait up to 30 s for CONTROLLER to be active.
@@ -84,7 +87,8 @@ _arm_up() {
               >"$log" 2>&1 </dev/null & )
         echo "$role arm starting, log: $log"
     fi
-    until ros2 control list_controllers -c "/$role/controller_manager" 2>/dev/null \
+    # timeout, or list_controllers waits forever when the stack never came up.
+    until timeout 5 ros2 control list_controllers -c "/$role/controller_manager" 2>/dev/null \
             | grep -Eq "^$ctl( |\[).*[^n]active"; do
         if [ "$SECONDS" -ge "$end" ] || { [ -f "$pidf" ] && ! _arm_alive "$role"; }; then
             echo "$role arm: $ctl not active (stack exited, or 30 s passed). End of $log:"

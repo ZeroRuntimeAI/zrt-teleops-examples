@@ -24,11 +24,11 @@
     # Keep equal to update_rate in the *_controllers.yaml files.
     control_hz: 200
 
-    # Refuse to arm while the two arms disagree by more than this on any
-    # joint (in the node's normalised units; 0.05 is the SDK default).
-    # 0.0 turns the check off -- then the follower jumps to wherever the
-    # leader is the moment you arm.
-    max_misalignment: 0.05
+    # 0.0 arms immediately: the follower travels to the leader's pose at the
+    # max_norm_step slew below (a full sweep in ~1.3 s), not in one jump.
+    # A positive value refuses to arm while any joint differs by more than
+    # that, in normalised units (0.05 = 5 % of travel).
+    max_misalignment: 0.0
 
     # Follower slew limit: the most a joint may move per 5 ms tick, as a
     # fraction of its full calibrated travel. 200 Hz x 0.00375 = 0.75 full
