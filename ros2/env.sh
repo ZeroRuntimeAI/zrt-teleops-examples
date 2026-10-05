@@ -64,6 +64,25 @@ fake_leader() { local v="${1:-0.0}"; ros2 topic pub -r 50 /leader/joint_states \
                       position: [$v, $v, $v, $v, $v, $v]}"; }
 watch_follower() { ros2 topic echo /follower/forward_controller/commands; }
 
+# -- policy instead of an arm --------------------------------------------------
+# The leader bridge alone, driven by action chunks on ~/action_chunk instead of
+# /leader/joint_states. No alignment gate: a policy has no arm to align.
+# leader_down stops it. Anything after policy_up goes to the bridge.
+policy_up() { _bridge_up leader "$ZRT_LEADER_ID" -p leader_source:=policy \
+                  -p max_misalignment:=0.0 "$@"; }
+# fake_chunk [radians]: one 10-point chunk, 20 ms apart, shoulder_pan ramping
+# 0..radians (default 0.3), the rest 0. Needs policy_up, then arm.
+fake_chunk() {
+    local rad="${1:-0.3}" pts="" i v
+    for i in $(seq 0 9); do
+        v="$(awk -v r="$rad" -v i="$i" 'BEGIN { printf "%.6f", r * i / 9 }')"
+        pts+="{positions: [$v, 0.0, 0.0, 0.0, 0.0, 0.0], time_from_start: {sec: 0, nanosec: $(( (i + 1) * 20000000 ))}},"
+    done
+    ros2 topic pub --once -w 1 /leader$_bridge/action_chunk trajectory_msgs/msg/JointTrajectory \
+        "{joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper],
+          points: [${pts%,}]}"
+}
+
 # -- the leader machine --------------------------------------------------------
 arm()    { ros2 service call /leader$_bridge/enable std_srvs/srv/SetBool "{data: true}"; }
 disarm() { ros2 service call /leader$_bridge/enable std_srvs/srv/SetBool "{data: false}"; }
@@ -76,6 +95,16 @@ record_on()   { ros2 service call /follower$_bridge/recording std_srvs/srv/SetBo
 record_off()  { ros2 service call /follower$_bridge/recording std_srvs/srv/SetBool "{data: false}"; }
 episode_on()  { ros2 service call /follower$_bridge/episode std_srvs/srv/SetBool "{data: true}"; }
 episode_off() { ros2 service call /follower$_bridge/episode std_srvs/srv/SetBool "{data: false}"; }
+# Close the open episode with an outcome stored alongside it.
+episode_success() { ros2 service call /follower$_bridge/episode_end std_srvs/srv/SetBool "{data: true}"; }
+episode_fail()    { ros2 service call /follower$_bridge/episode_end std_srvs/srv/SetBool "{data: false}"; }
+
+# -- watching, either machine --------------------------------------------------
+# One JSON object per message: events as they happen, stats once a second.
+follower_events() { ros2 topic echo --field data /follower$_bridge/events std_msgs/msg/String; }
+leader_events()   { ros2 topic echo --field data /leader$_bridge/events std_msgs/msg/String; }
+follower_stats()  { ros2 topic echo --field data /follower$_bridge/stats std_msgs/msg/String; }
+leader_stats()    { ros2 topic echo --field data /leader$_bridge/stats std_msgs/msg/String; }
 
 # -- plumbing ------------------------------------------------------------------
 # NAME below is <role>_arm or <role>_bridge: .run/NAME.pid holds its process

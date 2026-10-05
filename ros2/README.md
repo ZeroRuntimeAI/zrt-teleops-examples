@@ -19,8 +19,8 @@ zrt-teleops-ros2-leader  ◀── video + state ──  zrt-teleops-ros2-follow
 ```
 
 There are no nodes of our own here: a URDF, controller configs, two launch
-files and some shell shortcuts. One arm per machine. Read
-[`caveats.md`](caveats.md) before the first run on real arms.
+files and some shell shortcuts. One arm per machine, or both on one machine.
+Read Troubleshooting below before the first run on real arms.
 
 ## Needs
 
@@ -155,6 +155,7 @@ Recording is on the follower machine too:
 record_on      # start writing to recording_dir (bridge.yaml)
 episode_on     # start an episode, tagged with episode_task
 episode_off
+episode_success  # or episode_fail: close it with an outcome stored alongside
 record_off
 ```
 
@@ -181,6 +182,121 @@ arm
 follow `fake_leader`. The bridge still needs a calibration to normalise
 against, so `ZRT_LEADER_ID` / `ZRT_FOLLOWER_ID` must name a real JSON on
 that machine.
+
+## Watching
+
+```bash
+follower_events   # safe state, lease, limits, episodes... one JSON per line
+leader_events     # lease granted / denied, active operator
+follower_stats    # the SDK's stats, once a second (stats_hz)
+leader_stats
+```
+
+The follower also publishes one `diagnostic_msgs/DiagnosticStatus` per
+camera on `/diagnostics` (OK, WARN on missed reads, ERROR on a reopen), so
+`rqt_robot_monitor` shows camera health.
+
+## Topics and services
+
+All under the bridge node, `/<role>/zrt_teleop_bridge/...`. Stock types
+only, so nothing to build: anything structured is JSON in a
+`std_msgs/String`, and arguments a `Trigger` cannot carry are parameters
+(`ros2 param set` first).
+
+| Role | Name | Type | What |
+|---|---|---|---|
+| both | `events` | pub `std_msgs/String` | SDK events as JSON |
+| both | `stats` | pub `std_msgs/String` | stats JSON every `1/stats_hz` s |
+| both | `active_operator` | pub `std_msgs/String`, latched | who may hold the lease; empty = first come |
+| both | `estop` | srv `Trigger` | latch an e-stop |
+| both | `set_active_operator` / `clear_active_operator` | srv `Trigger` | hand control to param `active_operator_id` / clear it |
+| both | `rpc_call` | srv `Trigger` | call `rpc_method` on `rpc_peer` with `rpc_payload` (JSON); refused while armed |
+| leader | `enable` | srv `SetBool` | arm / disarm |
+| leader | `action_chunk` | sub `trajectory_msgs/JointTrajectory` | policy mode only, see below |
+| leader | `observation_id` | pub `std_msgs/UInt64` | id of each follower observation |
+| leader | `peer_id` | pub `std_msgs/String`, latched | this leader's id, for `active_operator_id` |
+| leader | `remote/follower_states` | pub `sensor_msgs/JointState` | the follower's joints, leader units |
+| follower | `safe_state` | pub `std_msgs/String`, latched | `holding`, `active`, `estopped`... |
+| follower | `applied` | pub `std_msgs/String` | every write, if `publish_applied: true` |
+| follower | `rpc/requests` | pub `std_msgs/String` | RPCs it answered (`rpc_methods`) |
+| follower | `clear_estop` | srv `Trigger` | the only way out of an e-stop |
+| follower | `recording` / `episode` | srv `SetBool` | start/stop |
+| follower | `episode_end` | srv `SetBool` | close the episode, `data` = success |
+
+## Policy mode (action chunks)
+
+A policy can drive the follower instead of the leader arm. Start the leader
+bridge with `leader_source: policy` and it stops reading
+`/leader/joint_states`; the follower then moves only on chunks published to
+`/leader/zrt_teleop_bridge/action_chunk`. Without arms:
+
+```bash
+follower_mock     # follower machine
+policy_up         # leader machine: the bridge in policy mode (leader_down after)
+arm
+fake_chunk 0.3    # one chunk: shoulder_pan ramps 0 -> 0.3 rad over 200 ms
+watch_follower
+```
+
+A chunk is a `trajectory_msgs/JointTrajectory`:
+
+- `joint_names`: every joint in the bridge's `joint_names`, any order.
+- `points[].positions`: in the leader's units, radians here, the same as
+  `/leader/joint_states`.
+- `points[].time_from_start`: evenly spaced (1 ms tolerance). Only the
+  spacing counts; the follower starts playing on arrival and interpolates
+  between points at its own control rate. A single point is held as a
+  pose.
+- `header.frame_id`: the last `observation_id` the policy saw, as a decimal
+  string, or empty.
+
+Each new chunk replaces the one still playing, so send overlapping
+horizons. After the last point the arm holds. The follower still applies
+its clamp, slew limit and watchdog every tick, and `disarm` / `estop` stop
+it as usual. A chunk sent to a leader in the default `arm` mode is dropped
+with a warning.
+
+A minimal publisher:
+
+```python
+import rclpy
+from builtin_interfaces.msg import Duration
+from rclpy.node import Node
+from std_msgs.msg import UInt64
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex",
+          "wrist_flex", "wrist_roll", "gripper"]
+BRIDGE = "/leader/zrt_teleop_bridge"
+
+
+class Policy(Node):
+    def __init__(self):
+        super().__init__("policy")
+        self.oid = None
+        self.create_subscription(UInt64, f"{BRIDGE}/observation_id",
+                                 lambda m: setattr(self, "oid", m.data), 10)
+        self.pub = self.create_publisher(JointTrajectory,
+                                         f"{BRIDGE}/action_chunk", 10)
+        self.create_timer(0.2, self.step)        # a new horizon every 200 ms
+
+    def step(self):
+        actions = [[0.0] * len(JOINTS) for _ in range(10)]   # your model here
+        msg = JointTrajectory(joint_names=JOINTS)
+        msg.header.frame_id = "" if self.oid is None else str(self.oid)
+        for i, a in enumerate(actions):
+            msg.points.append(JointTrajectoryPoint(
+                positions=a,
+                time_from_start=Duration(nanosec=(i + 1) * 20_000_000)))
+        self.pub.publish(msg)
+
+
+rclpy.init()
+rclpy.spin(Policy())
+```
+
+The follower's state, for the policy's input, is on
+`/leader/zrt_teleop_bridge/remote/follower_states`.
 
 ## Troubleshooting
 
@@ -221,7 +337,6 @@ but RViz does, and wants `package://` or `file://` URIs. Not set up here.
 
 ```
 env.sh                       shortcuts; source it
-caveats.md                   what can bite, and what to do
 bringup/launch/              leader.launch.py, follower.launch.py
 bringup/urdf/                so101.urdf.xacro + TheRobotStudio's URDFs (Apache-2.0, see NOTICE)
 bringup/config/              controllers, bridge params

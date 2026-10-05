@@ -15,8 +15,8 @@ Everything lives under /follower:
 
 When the room goes quiet the bridge stops publishing and forward_controller
 holds the last command: the arm holds, it does not fall. Stopping THIS
-launch is different: the driver turns torque off and the arm drops (see
-caveats.md).
+launch is different: the driver turns torque off and the arm drops
+(support it first; `follower_off` warns before doing this).
 
 Args: hardware:=feetech|mock, usb_port, robot_id,
 bridge:=true|false (false to run the bridge yourself, e.g. under a debugger).
