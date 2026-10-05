@@ -50,3 +50,7 @@
     # with each episode.
     # recording_dir: ./sessions
     # episode_task: pick up the cube
+    # Also record the meeting in VideoSDK's cloud (billed), on top of local.
+    # cloud_recording: true
+    # Seconds to wait for the cloud recorder before falling back to local.
+    # cloud_recording_timeout_s: 90.0

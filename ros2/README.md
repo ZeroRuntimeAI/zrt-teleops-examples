@@ -99,8 +99,10 @@ leader_up
 ```
 
 Each starts the arm stack — driver and controllers — in the background,
-logging to `.run/<role>_arm.log`, waits for its controller, then runs the
-bridge in the foreground. The leader arm is declared with no command
+logging to `.run/<role>_arm.log`, waits for its controller, then starts the
+bridge in the background too, logging to `.run/<role>_bridge.log`, and gives
+the prompt back once it has joined the meeting. Both keep running when you
+close the terminal or the ssh session. The leader arm is declared with no command
 interface, so the driver never enables its torque and it stays limp in your
 hand. The follower is stiff as soon as the driver loads, holding where it
 was.
@@ -126,13 +128,17 @@ lining up. To require the arms to match first, set `max_misalignment` in
 `bridge.yaml` (0.05 = 5 % of travel); `arm` is then refused while any joint
 differs by more, and the refusal names the joint.
 
-Ctrl-c stops only the bridge; the arm stack keeps running, and the follower
-holds its last position. `follower_up` again reuses it. To stop the stack:
+Leaving and stopping, on either machine:
 
 ```bash
-follower_down   # torque OFF: the arm drops. Support it first.
-leader_down     # the leader is limp anyway
+follower_logs   # follow the bridge's log; Ctrl-C stops only the tail
+follower_down   # leave the meeting; the arm stack keeps running
+follower_off    # leave, then stop the stack: torque OFF, the arm drops. Support it first.
 ```
+
+`leader_logs`, `leader_down` and `leader_off` are the same on the leader
+machine; the leader is limp anyway. After `follower_down` the follower holds
+its last position, and `follower_up` rejoins, reusing the running stack.
 
 Anything after `follower_up` / `leader_up` goes to `ros2 launch`, e.g.
 `follower_up usb_port:=/dev/ttyACM1`.
@@ -152,14 +158,20 @@ episode_off
 record_off
 ```
 
+For a cloud copy as well, set `cloud_recording: true` in the follower
+machine's `bridge.yaml` and restart the follower bridge (`follower_down`,
+then `follower_up`). `record_on` then records locally and in VideoSDK's
+cloud; episodes wait until the cloud recorder is ready. `follower_logs`
+shows each `cloud recording:` state.
+
 ## Without arms
 
 The same session on mock hardware, to check the room, the token and the
 wiring before a servo is involved. Two machines or two shells:
 
 ```bash
-follower_mock                          # follower on mock_components (follower_down after)
-leader_mock                            # the leader bridge alone
+follower_mock                          # follower on mock_components (follower_off after)
+leader_mock                            # the leader bridge alone (leader_down after)
 fake_leader 0.2                        # stands in for the leader arm, radians
 watch_follower                         # the commands the follower gets
 arm
@@ -178,7 +190,7 @@ not up, or a name is off. `ros2 control list_controllers -c
 `forward_controller`) active; `ros2 topic list` should include
 `/leader/joint_states`, `/follower/joint_states` and
 `/follower/forward_controller/commands`. The stack's own output is in
-`.run/<role>_arm.log`.
+`.run/<role>_arm.log`, the bridge's in `.run/<role>_bridge.log`.
 
 **`arm` is refused as misaligned.** Only with `max_misalignment` > 0: read
 the message, move the leader. To see

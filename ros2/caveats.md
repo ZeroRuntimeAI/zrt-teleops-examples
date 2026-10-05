@@ -4,13 +4,14 @@ What can bite on real arms: the symptom, why, and what to do. Items marked
 *(to confirm on hardware)* follow from the driver and ros2_control source but
 have not been checked on an arm yet.
 
-**Stopping drops the follower.** Ctrl-c on `follower_up` stops only the
-bridge: the arm stack keeps running and `forward_controller` holds the last
-command, so the arm holds. `follower_down`, or killing the stack any other
-way (including Ctrl-c on a plain `ros2 launch follower.launch.py`), shuts
-down ros2_control, the driver deactivates and writes torque off to every
-servo, and the arm falls. Support it first. The leader has no torque, so
-nothing drops there. *(to confirm on hardware)*
+**Stopping drops the follower.** `follower_down` stops only the bridge, and
+closing the terminal stops nothing: the arm stack keeps running and
+`forward_controller` holds the last command, so the arm holds.
+`follower_off`, or killing the stack any other way (including Ctrl-c on a
+plain `ros2 launch follower.launch.py`, or `docker stop` on its container),
+shuts down ros2_control, the driver deactivates and writes torque off to
+every servo, and the arm falls. Support it first. The leader has no torque,
+so nothing drops there. *(to confirm on hardware)*
 
 **Middle pose reads ~3.14 rad.** Driver 0.2.2 reports `raw - offset` in
 radians with `offset` defaulting to 0, and `lerobot-calibrate` homed the
@@ -61,6 +62,13 @@ than the calibrated range. Leave it false (the default).
 
 **Recordings are not where you expected.** `recording_dir` (`./sessions`)
 is relative to the directory you ran `follower_up` from.
+
+**Episodes don't start right after `record_on` with cloud recording.** With
+`cloud_recording: true`, `episode_on` is refused and arming opens no episode
+until VideoSDK's cloud recorder is ready (up to `cloud_recording_timeout_s`, 90 s by default, before it gives up and falls back to local-only).
+Wait for `cloud recording: ready` in the follower log. If it fails or passes
+`cloud_recording_timeout_s`, recording carries on local-only and episodes
+open again.
 
 **The follower bridge fails at startup on `camera_handles`.** The values must
 be strings: `['0', '2']` or `/dev/v4l/by-path/...` paths. An unquoted
