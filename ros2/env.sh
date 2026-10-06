@@ -15,25 +15,20 @@ _config="$ZRT_ROS2/bringup/config"
 _run="$ZRT_ROS2/.run"
 
 # -- join and leave ----------------------------------------------------------
-# <role>_up starts the arm stack (driver + controllers) in the background,
-# logging to .run/<role>_arm.log -- or reuses the one already running -- then
-# starts the bridge in the background too, logging to .run/<role>_bridge.log,
-# and gives the prompt back once it has joined. Both run in their own session:
-# closing the terminal, ssh or `docker exec` stops neither.
-# Anything after <role>_up goes to `ros2 launch`, e.g. usb_port:=/dev/ttyACM1.
+# <role>_up starts (or reuses) the arm stack, then the bridge, in the
+# background with logs in .run/, and returns once joined. Closing the terminal
+# stops neither. Extra args go to `ros2 launch`, e.g. usb_port:=/dev/ttyACM1.
 follower_up() { _have_bridge follower && _arm_up follower forward_controller hardware:=feetech \
                     usb_port:="$ZRT_FOLLOWER_PORT" "$@" && _bridge_up follower "$ZRT_FOLLOWER_ID"; }
 leader_up()   { _have_bridge leader && _arm_up leader joint_state_broadcaster hardware:=feetech \
                     usb_port:="$ZRT_LEADER_PORT" "$@" && _bridge_up leader "$ZRT_LEADER_ID"; }
 
-# <role>_down stops only the bridge: it leaves the meeting. The arm stack keeps
-# running, so the follower holds its last command; <role>_up rejoins.
+# <role>_down leaves the meeting; the arm stack keeps running, so the follower holds.
 follower_down() { _stop follower_bridge 15 && echo "left the meeting; the follower arm keeps" \
                       "holding (forward_controller keeps the last command); follower_off to power it down"; }
 leader_down()   { _stop leader_bridge 15 && echo "left the meeting"; }
 
-# <role>_off powers the arm down: leaves the meeting if still in it, then
-# stops the stack. That turns the follower's torque off: the arm drops.
+# <role>_off leaves and stops the stack. On the follower torque goes off: the arm drops.
 follower_off() {
     if _alive follower_arm; then
         echo "follower_off turns the servos' torque off: the arm DROPS."
@@ -43,19 +38,16 @@ follower_off() {
 }
 leader_off() { _off leader; }   # no torque on the leader, nothing drops
 
-# <role>_logs follows the bridge's log. Ctrl-C stops only the tail.
+# Ctrl-C stops only the tail, not the bridge.
 follower_logs() { tail -n 50 -F "$_run/follower_bridge.log"; }
 leader_logs()   { tail -n 50 -F "$_run/leader_bridge.log"; }
 
 # -- no arm ------------------------------------------------------------------
-# The follower on mock_components: the commanded position becomes the state.
-# Same stack slot as follower_up, so follower_down / follower_off stop it.
+# follower_up on mock hardware: the commanded position becomes the state.
 follower_mock() { _arm_up follower forward_controller hardware:=mock "$@" \
                       && _bridge_up follower "$ZRT_FOLLOWER_ID"; }
-# The leader is just the bridge; fake_leader stands in for the arm. No mock
-# stack here: its joint_state_broadcaster would publish /leader/joint_states
-# too and fight fake_leader. Anything after leader_mock goes to the bridge.
-# leader_down stops it.
+# The bridge alone, fed by fake_leader. No mock stack: its broadcaster would
+# fight fake_leader on /leader/joint_states.
 leader_mock() { _bridge_up leader "$ZRT_LEADER_ID" "$@"; }
 # fake_leader [radians]: all six joints at one value (default 0), 50 Hz.
 fake_leader() { local v="${1:-0.0}"; ros2 topic pub -r 50 /leader/joint_states \
@@ -65,13 +57,12 @@ fake_leader() { local v="${1:-0.0}"; ros2 topic pub -r 50 /leader/joint_states \
 watch_follower() { ros2 topic echo /follower/forward_controller/commands; }
 
 # -- policy instead of an arm --------------------------------------------------
-# The leader bridge alone, driven by action chunks on ~/action_chunk instead of
-# /leader/joint_states. No alignment gate: a policy has no arm to align.
-# leader_down stops it. Anything after policy_up goes to the bridge.
+# The leader bridge driven by ~/action_chunk instead of an arm. No alignment
+# gate: a policy has no arm to align.
 policy_up() { _bridge_up leader "$ZRT_LEADER_ID" -p leader_source:=policy \
                   -p max_misalignment:=0.0 "$@"; }
-# fake_chunk [radians]: one 10-point chunk, 20 ms apart, shoulder_pan ramping
-# 0..radians (default 0.3), the rest 0. Needs policy_up, then arm.
+# fake_chunk [radians]: one 10-point chunk ramping shoulder_pan to radians
+# (default 0.3). Needs policy_up, then take_control.
 fake_chunk() {
     local rad="${1:-0.3}" pts="" i v
     for i in $(seq 0 9); do
@@ -84,26 +75,31 @@ fake_chunk() {
 }
 
 # -- the leader machine --------------------------------------------------------
-arm()    { ros2 service call /leader$_bridge/enable std_srvs/srv/SetBool "{data: true}"; }
-disarm() { ros2 service call /leader$_bridge/enable std_srvs/srv/SetBool "{data: false}"; }
-estop()  { ros2 service call /leader$_bridge/estop std_srvs/srv/Trigger; }
+take_control()    { ros2 service call /leader$_bridge/take_control std_srvs/srv/Trigger; }
+release_control() { ros2 service call /leader$_bridge/release_control std_srvs/srv/Trigger; }
+estop()           { ros2 service call /leader$_bridge/estop std_srvs/srv/Trigger; }
 # Leave / rejoin the meeting; the bridge and the arm stack keep running.
-leader_leave() { ros2 service call /leader$_bridge/join std_srvs/srv/SetBool "{data: false}"; }
-leader_join()  { ros2 service call /leader$_bridge/join std_srvs/srv/SetBool "{data: true}"; }
+leader_leave() { ros2 service call /leader$_bridge/leave std_srvs/srv/Trigger; }
+leader_join()  { ros2 service call /leader$_bridge/join std_srvs/srv/Trigger; }
 
 # -- the follower machine ------------------------------------------------------
 follower_estop() { ros2 service call /follower$_bridge/estop std_srvs/srv/Trigger; }
 clear_estop()    { ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
-record_on()   { ros2 service call /follower$_bridge/recording std_srvs/srv/SetBool "{data: true}"; }
-record_off()  { ros2 service call /follower$_bridge/recording std_srvs/srv/SetBool "{data: false}"; }
-episode_on()  { ros2 service call /follower$_bridge/episode std_srvs/srv/SetBool "{data: true}"; }
-episode_off() { ros2 service call /follower$_bridge/episode std_srvs/srv/SetBool "{data: false}"; }
-# Close the open episode with an outcome stored alongside it.
-episode_success() { ros2 service call /follower$_bridge/episode_end std_srvs/srv/SetBool "{data: true}"; }
-episode_fail()    { ros2 service call /follower$_bridge/episode_end std_srvs/srv/SetBool "{data: false}"; }
+start_recording() { ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
+stop_recording()  { ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
+start_episode()   { ros2 service call /follower$_bridge/start_episode std_srvs/srv/Trigger; }
+# end_episode [success|fail]: close the open episode, with an outcome if given.
+end_episode() {
+    case "$1" in
+        "")      ros2 service call /follower$_bridge/end_episode std_srvs/srv/Trigger ;;
+        success) ros2 service call /follower$_bridge/end_episode_success std_srvs/srv/Trigger ;;
+        fail)    ros2 service call /follower$_bridge/end_episode_fail std_srvs/srv/Trigger ;;
+        *)       echo "usage: end_episode [success|fail]"; return 1 ;;
+    esac
+}
 # Leave / rejoin the meeting; the arm stack keeps running, so the arm holds.
-follower_leave() { ros2 service call /follower$_bridge/join std_srvs/srv/SetBool "{data: false}"; }
-follower_join()  { ros2 service call /follower$_bridge/join std_srvs/srv/SetBool "{data: true}"; }
+follower_leave() { ros2 service call /follower$_bridge/leave std_srvs/srv/Trigger; }
+follower_join()  { ros2 service call /follower$_bridge/join std_srvs/srv/Trigger; }
 
 # -- watching, either machine --------------------------------------------------
 # One JSON object per message: events as they happen, stats once a second.
@@ -113,8 +109,7 @@ follower_stats()  { ros2 topic echo --field data /follower$_bridge/stats std_msg
 leader_stats()    { ros2 topic echo --field data /leader$_bridge/stats std_msgs/msg/String; }
 
 # -- plumbing ------------------------------------------------------------------
-# NAME below is <role>_arm or <role>_bridge: .run/NAME.pid holds its process
-# group id (setsid makes it the leader), .run/NAME.log its output.
+# NAME is <role>_arm or <role>_bridge; .run/NAME.pid holds its process group id.
 _pid()   { cat "$_run/$1.pid" 2>/dev/null; }
 # A process that died leaves a zombie, and its group still answers kill -0.
 _alive() { local p; p="$(_pid "$1")" && [ -n "$p" ] \
@@ -122,15 +117,13 @@ _alive() { local p; p="$(_pid "$1")" && [ -n "$p" ] \
                && [ "$(ps -o state= -p "$p" 2>/dev/null)" != Z ]; }
 # _running ROLE NODE: /ROLE/NODE is up, whoever started it.
 _running() { ros2 node list 2>/dev/null | grep -qx "/$1/$2"; }
-# The bridge is pip-installed in the venv: say so instead of "exec: not found".
 _have_bridge() { command -v "zrt-teleops-ros2-$1" >/dev/null || {
     echo "zrt-teleops-ros2-$1 not found: activate the venv first (. ~/ros2-venv/bin/activate)"
     return 1; }; }
 
-# _spawn NAME CMD...: CMD in its own session, with no terminal, so Ctrl-C here
-# and a closed terminal never reach it. setsid -f rather than `&`: a
-# background job of a script ignores SIGINT, and SIGINT is how both stop
-# cleanly. The child writes its own pid, the pidfile appears just after.
+# _spawn NAME CMD...: CMD in its own session, out of reach of Ctrl-C here and
+# a closed terminal. setsid -f, not `&`: a script's background job ignores
+# SIGINT, and SIGINT is how both stop cleanly. The pidfile appears just after.
 _spawn() {
     local name="$1"; shift
     mkdir -p "$_run"; rm -f "$_run/$name.pid"
@@ -146,11 +139,9 @@ _arm_up() {
     if _alive "${role}_arm"; then
         echo "$role arm already running (pid $(_pid "${role}_arm")); reusing it as it is"
     elif _running "$role" controller_manager; then
-        # Started by `ros2 launch` in another terminal: a second stack would
-        # fight it for the serial port. That terminal is the arm; this one is
-        # for commands only.
+        # Started by `ros2 launch` elsewhere: a second stack would fight it for the port.
         echo "$role arm already running outside env.sh (ros2 launch?): not starting a second one." \
-             "Use this terminal for commands: arm, record_on, ${role}_leave, ${role}_join ..."
+             "Use this terminal for commands: take_control, start_recording, ${role}_leave, ${role}_join ..."
         return 1
     else
         _spawn "${role}_arm" ros2 launch "$ZRT_ROS2/bringup/launch/$role.launch.py" bridge:=false "$@"
@@ -220,7 +211,6 @@ _stop() {
     echo "${name/_/ } stopped"
 }
 
-# _off ROLE: leave the meeting if still in it, then stop the arm stack.
 _off() {
     if _alive "$1_bridge"; then _stop "$1_bridge" 15 || return 1; fi
     _stop "$1_arm" 10

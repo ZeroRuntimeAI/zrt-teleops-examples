@@ -126,9 +126,9 @@ T2, in `ros2/`: `source env.sh`, then the shortcuts below. Each is one
 Then, on the leader machine:
 
 ```bash
-arm        # claim the follower and start sending
-disarm     # stop sending; the follower holds where it is
-estop      # latch an e-stop on the follower
+take_control     # claim the follower and start sending
+release_control  # stop sending; the follower holds where it is
+estop            # latch an e-stop on the follower
 ```
 
 On the follower machine:
@@ -138,11 +138,11 @@ follower_estop   # latch an e-stop from this side
 clear_estop      # only here, on purpose: whoever can see the arm clears it
 ```
 
-`arm` takes control straight away: the follower travels to the leader's
+`take_control` acts straight away: the follower travels to the leader's
 pose at the slew limit (`max_norm_step`, a full sweep in ~1.3 s), so no manual
 lining up. To require the arms to match first, set `max_misalignment` in
-`bridge.yaml` (0.05 = 5 % of travel); `arm` is then refused while any joint
-differs by more, and the refusal names the joint.
+`bridge.yaml` (0.05 = 5 % of travel); `take_control` is then refused while
+any joint differs by more, and the refusal names the joint.
 
 Leaving and stopping:
 
@@ -182,18 +182,18 @@ leader side sees them as video.
 Recording is on the follower machine too:
 
 ```bash
-record_on      # start writing to recording_dir (bridge.yaml)
-episode_on     # start an episode, tagged with episode_task
-episode_off
-episode_success  # or episode_fail: close it with an outcome stored alongside
-record_off
+start_recording   # start writing to recording_dir (bridge.yaml)
+start_episode     # start an episode, tagged with episode_task
+end_episode       # or end_episode success / fail: close it with an outcome too
+stop_recording
 ```
 
 For a cloud copy as well, set `cloud_recording: true` in the follower
 machine's `bridge.yaml` and restart the follower bridge: relaunch T1
-(supporting the arm), or `follower_down` then `follower_up`. `record_on`
-then records locally and in VideoSDK's cloud; episodes wait until the cloud
-recorder is ready. The bridge's log shows each `cloud recording:` state.
+(supporting the arm), or `follower_down` then `follower_up`.
+`start_recording` then records locally and in VideoSDK's cloud; episodes
+wait until the cloud recorder is ready. The bridge's log shows each
+`cloud recording:` state.
 
 ## Without arms
 
@@ -205,10 +205,10 @@ follower_mock                          # follower on mock_components (follower_o
 leader_mock                            # the leader bridge alone (leader_down after)
 fake_leader 0.2                        # stands in for the leader arm, radians
 watch_follower                         # the commands the follower gets
-arm
+take_control
 ```
 
-`watch_follower` prints six numbers per message once armed, and they
+`watch_follower` prints six numbers per message once in control, and they
 follow `fake_leader`. The bridge still needs a calibration to normalise
 against, so `ZRT_LEADER_ID` / `ZRT_FOLLOWER_ID` must name a real JSON on
 that machine.
@@ -239,10 +239,10 @@ only, no interfaces to build: anything structured is JSON in a
 | both | `stats` | pub `std_msgs/String` | stats JSON every `1/stats_hz` s |
 | both | `active_operator` | pub `std_msgs/String`, latched | who may hold the lease; empty = first come |
 | both | `estop` | srv `Trigger` | latch an e-stop |
-| both | `join` | srv `SetBool` | leave (`false`) / rejoin (`true`) the meeting; the arm stack keeps running |
+| both | `join` / `leave` | srv `Trigger` | rejoin / leave the meeting; the arm stack keeps running |
 | both | `set_active_operator` / `clear_active_operator` | srv `Trigger` | hand control to param `active_operator_id` / clear it |
-| both | `rpc_call` | srv `Trigger` | call `rpc_method` on `rpc_peer` with `rpc_payload` (JSON); refused while armed |
-| leader | `enable` | srv `SetBool` | arm / disarm |
+| both | `perform_rpc` | srv `Trigger` | call `rpc_method` on `rpc_peer` with `rpc_payload` (JSON); refused while in control |
+| leader | `take_control` / `release_control` | srv `Trigger` | start / stop sending to the follower |
 | leader | `action_chunk` | sub `trajectory_msgs/JointTrajectory` | policy mode only, see below |
 | leader | `observation_id` | pub `std_msgs/UInt64` | id of each follower observation |
 | leader | `peer_id` | pub `std_msgs/String`, latched | this leader's id, for `active_operator_id` |
@@ -251,8 +251,9 @@ only, no interfaces to build: anything structured is JSON in a
 | follower | `applied` | pub `std_msgs/String` | every write, if `publish_applied: true` |
 | follower | `rpc/requests` | pub `std_msgs/String` | RPCs it answered (`rpc_methods`) |
 | follower | `clear_estop` | srv `Trigger` | the only way out of an e-stop |
-| follower | `recording` / `episode` | srv `SetBool` | start/stop |
-| follower | `episode_end` | srv `SetBool` | close the episode, `data` = success |
+| follower | `start_recording` / `stop_recording` | srv `Trigger` | start/stop recording |
+| follower | `start_episode` / `end_episode` | srv `Trigger` | start/end an episode |
+| follower | `end_episode_success` / `end_episode_fail` | srv `Trigger` | end it with an outcome stored alongside |
 
 ## Policy mode (action chunks)
 
@@ -264,7 +265,7 @@ bridge with `leader_source: policy` and it stops reading
 ```bash
 follower_mock     # follower machine
 policy_up         # leader machine: the bridge in policy mode (leader_down after)
-arm
+take_control
 fake_chunk 0.3    # one chunk: shoulder_pan ramps 0 -> 0.3 rad over 200 ms
 watch_follower
 ```
@@ -283,9 +284,9 @@ A chunk is a `trajectory_msgs/JointTrajectory`:
 
 Each new chunk replaces the one still playing, so send overlapping
 horizons. After the last point the arm holds. The follower still applies
-its clamp, slew limit and watchdog every tick, and `disarm` / `estop` stop
-it as usual. A chunk sent to a leader in the default `arm` mode is dropped
-with a warning.
+its clamp, slew limit and watchdog every tick, and `release_control` /
+`estop` stop it as usual. A chunk sent to a leader in the default `arm`
+mode is dropped with a warning.
 
 A minimal publisher:
 
@@ -340,8 +341,8 @@ not up, or a name is off. `ros2 control list_controllers -c
 bridge's output; in the background flow they are in `.run/<role>_arm.log`
 and `.run/<role>_bridge.log`.
 
-**`arm` is refused as misaligned.** Only with `max_misalignment` > 0: read
-the message, move the leader. To see
+**`take_control` is refused as misaligned.** Only with
+`max_misalignment` > 0: read the message, move the leader. To see
 where the follower is from the leader machine: `ros2 topic echo
 /leader/zrt_teleop_bridge/remote/follower_states`.
 

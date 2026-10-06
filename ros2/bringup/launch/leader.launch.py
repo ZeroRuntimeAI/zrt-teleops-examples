@@ -2,27 +2,16 @@
 The leader machine: one SO-101 read over ros2_control, and the bridge that
 sends it into the room.
 
-Two terminals. T1 brings the arm up and joins the meeting, and stays in
-the foreground:
-
     ros2 launch so101_teleop_bringup leader.launch.py
 
-T2 is for commands: `source env.sh`, then arm, disarm, estop, ...
+Then, in a second terminal, `source env.sh` for take_control,
+release_control, estop, ...
 
-Everything lives under /leader:
-    /leader/joint_states                 joint_state_broadcaster -> bridge
-    /leader/zrt_teleop_bridge/enable     arm / disarm (std_srvs/SetBool)
-    /leader/zrt_teleop_bridge/estop      latch an e-stop on the follower
-    /leader/zrt_teleop_bridge/join       leave (false) / rejoin (true) the meeting
-
-The arm is declared state-only (no command interface), so the driver never
-enables torque and it stays limp in your hand: Ctrl-C on this launch is
-harmless. `leader_leave` / `leader_join` from T2 (~/join) leave and rejoin
-without stopping it.
+The arm has no command interface, so its torque stays off: Ctrl-C here is
+harmless.
 
 Args: hardware:=feetech|mock, usb_port (default $ZRT_LEADER_PORT),
-robot_id (default $ZRT_LEADER_ID), bridge:=true|false (false to run the
-bridge yourself, e.g. under a debugger).
+robot_id (default $ZRT_LEADER_ID), bridge:=false to run the bridge yourself.
 """
 
 import os
@@ -81,7 +70,6 @@ def setup(context):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("hardware", default_value="feetech"),
-        # From .env, so T1 needs no args.
         DeclareLaunchArgument("usb_port", default_value=EnvironmentVariable(
             "ZRT_LEADER_PORT", default_value="/dev/ttyACM0")),
         DeclareLaunchArgument("robot_id", default_value=EnvironmentVariable(

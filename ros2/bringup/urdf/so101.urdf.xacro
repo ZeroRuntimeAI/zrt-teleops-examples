@@ -4,11 +4,8 @@
 
     xacro so101.urdf.xacro role:=follower hardware:=feetech usb_port:=/dev/ttyACM0
 
-  The arm itself is TheRobotStudio's URDF, included unmodified (see NOTICE).
-  This file only adds the ros2_control block.
-
-  The leader gets NO command interface. feetech_ros2_driver enables torque only
-  on joints that have one, so a state-only leader stays limp in your hand.
+  Adds ros2_control to TheRobotStudio's URDF, included unmodified (see NOTICE).
+  The leader gets no command interface, so the driver never enables its torque.
 -->
 <robot name="so101" xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:arg name="role" default="follower"/>             <!-- leader | follower -->
@@ -25,9 +22,8 @@
     <xacro:include filename="so101_new_calib.urdf"/>
   </xacro:if>
 
-  <!-- Servo ids 1..6 in this order. Homing lives in the servos (lerobot-calibrate
-       wrote it), so the middle pose reads ~2048 raw; feetech_ros2_driver reports
-       raw - offset, so offset 2048 makes that pose 0 rad. Mock ignores it. -->
+  <!-- Servo ids 1..6 in this order. lerobot-calibrate homes the middle pose to
+       ~2048 raw, so offset 2048 makes it 0 rad. Mock ignores it. -->
   <xacro:macro name="so101_joint" params="name id">
     <joint name="${name}">
       <param name="id">${id}</param>

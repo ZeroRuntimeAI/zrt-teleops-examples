@@ -2,32 +2,17 @@
 The follower machine: one SO-101 driven over ros2_control, and the bridge
 that takes commands from the room and sends it video and state back.
 
-Two terminals. T1 brings the arm up and joins the meeting, and stays in
-the foreground:
-
     ros2 launch so101_teleop_bringup follower.launch.py
 
-T2 is for commands: `source env.sh`, then record_on, follower_estop, ...
+Then, in a second terminal, `source env.sh` for start_recording,
+follower_estop, ...
 
-Everything lives under /follower:
-    /follower/joint_states                    joint_state_broadcaster -> bridge
-    /follower/forward_controller/commands     bridge -> forward_controller
-                                              (Float64MultiArray, joint_names order)
-    /follower/zrt_teleop_bridge/estop         latch an e-stop here
-    /follower/zrt_teleop_bridge/clear_estop   clear it (only here, on purpose)
-    /follower/zrt_teleop_bridge/recording     start / stop recording (SetBool)
-    /follower/zrt_teleop_bridge/episode       start / end an episode (SetBool)
-    /follower/zrt_teleop_bridge/join          leave (false) / rejoin (true) the meeting
-
-When the room goes quiet the bridge stops publishing and forward_controller
-holds the last command: the arm holds, it does not fall. Ctrl-C on THIS
-launch is different: it stops the driver too, torque goes off and the arm
-DROPS (support it first). To leave the meeting with the arm still holding,
-`follower_leave` from T2 (~/join false); `follower_join` rejoins.
+When the room goes quiet the arm holds its last command. Ctrl-C HERE stops
+the driver too: torque goes off and the arm DROPS, so support it first.
+`follower_leave` leaves the meeting with the arm still holding.
 
 Args: hardware:=feetech|mock, usb_port (default $ZRT_FOLLOWER_PORT),
-robot_id (default $ZRT_FOLLOWER_ID), bridge:=true|false (false to run the
-bridge yourself, e.g. under a debugger).
+robot_id (default $ZRT_FOLLOWER_ID), bridge:=false to run the bridge yourself.
 """
 
 import os
@@ -44,8 +29,7 @@ BRINGUP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def check_joint_order():
-    # The command is a bare positional array; forward_controller only checks
-    # its length, so a reordered list would drive the wrong servos.
+    # The command is a bare positional array: a reordered list drives the wrong servos.
     def load(name):
         with open(os.path.join(BRINGUP, "config", name)) as f:
             return yaml.safe_load(f)
@@ -102,7 +86,6 @@ def setup(context):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("hardware", default_value="feetech"),
-        # From .env, so T1 needs no args.
         DeclareLaunchArgument("usb_port", default_value=EnvironmentVariable(
             "ZRT_FOLLOWER_PORT", default_value="/dev/ttyACM0")),
         DeclareLaunchArgument("robot_id", default_value=EnvironmentVariable(

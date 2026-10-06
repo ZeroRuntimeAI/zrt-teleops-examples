@@ -10,8 +10,7 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- The apt list in README.md, plus what the launch files import. The
-       bridge itself (zrt-teleops-ros2-*) is pip, not rosdep: see README.md. -->
+  <!-- The bridge (zrt-teleops-ros2-*) is pip-installed, not a rosdep: see README.md. -->
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

@@ -1,8 +1,5 @@
-# The leader: read-only. joint_state_broadcaster publishes /leader/joint_states,
-# which the bridge reads. No command controller -- the arm stays limp.
-#
-# `/**/` because the nodes live under the /leader namespace; a bare
-# `controller_manager:` key would not match /leader/controller_manager.
+# Read-only: no command controller, so the arm stays limp.
+# `/**/` matches the nodes under /leader; a bare key would not.
 /**/controller_manager:
   ros__parameters:
     update_rate: 200  # Hz. Keep equal to control_hz in bridge.yaml.
