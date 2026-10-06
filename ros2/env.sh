@@ -21,9 +21,9 @@ _run="$ZRT_ROS2/.run"
 # and gives the prompt back once it has joined. Both run in their own session:
 # closing the terminal, ssh or `docker exec` stops neither.
 # Anything after <role>_up goes to `ros2 launch`, e.g. usb_port:=/dev/ttyACM1.
-follower_up() { _arm_up follower forward_controller hardware:=feetech \
+follower_up() { _have_bridge follower && _arm_up follower forward_controller hardware:=feetech \
                     usb_port:="$ZRT_FOLLOWER_PORT" "$@" && _bridge_up follower "$ZRT_FOLLOWER_ID"; }
-leader_up()   { _arm_up leader joint_state_broadcaster hardware:=feetech \
+leader_up()   { _have_bridge leader && _arm_up leader joint_state_broadcaster hardware:=feetech \
                     usb_port:="$ZRT_LEADER_PORT" "$@" && _bridge_up leader "$ZRT_LEADER_ID"; }
 
 # <role>_down stops only the bridge: it leaves the meeting. The arm stack keeps
@@ -120,6 +120,12 @@ _pid()   { cat "$_run/$1.pid" 2>/dev/null; }
 _alive() { local p; p="$(_pid "$1")" && [ -n "$p" ] \
                && kill -0 -- "-$p" 2>/dev/null \
                && [ "$(ps -o state= -p "$p" 2>/dev/null)" != Z ]; }
+# _running ROLE NODE: /ROLE/NODE is up, whoever started it.
+_running() { ros2 node list 2>/dev/null | grep -qx "/$1/$2"; }
+# The bridge is pip-installed in the venv: say so instead of "exec: not found".
+_have_bridge() { command -v "zrt-teleops-ros2-$1" >/dev/null || {
+    echo "zrt-teleops-ros2-$1 not found: activate the venv first (. ~/ros2-venv/bin/activate)"
+    return 1; }; }
 
 # _spawn NAME CMD...: CMD in its own session, with no terminal, so Ctrl-C here
 # and a closed terminal never reach it. setsid -f rather than `&`: a
@@ -139,6 +145,13 @@ _arm_up() {
     local pidf="$_run/${role}_arm.pid" log="$_run/${role}_arm.log" end=$((SECONDS + 30))
     if _alive "${role}_arm"; then
         echo "$role arm already running (pid $(_pid "${role}_arm")); reusing it as it is"
+    elif _running "$role" controller_manager; then
+        # Started by `ros2 launch` in another terminal: a second stack would
+        # fight it for the serial port. That terminal is the arm; this one is
+        # for commands only.
+        echo "$role arm already running outside env.sh (ros2 launch?): not starting a second one." \
+             "Use this terminal for commands: arm, record_on, ${role}_leave, ${role}_join ..."
+        return 1
     else
         _spawn "${role}_arm" ros2 launch "$ZRT_ROS2/bringup/launch/$role.launch.py" bridge:=false "$@"
         echo "$role arm starting, log: $log"
@@ -165,6 +178,11 @@ _bridge_up() {
         echo "$role bridge already running (pid $(_pid "$name")); ${role}_logs to follow, ${role}_down to leave"
         return 0
     fi
+    if _running "$role" zrt_teleop_bridge; then
+        echo "$role bridge already running outside env.sh (ros2 launch?); ${role}_leave / ${role}_join to leave / rejoin"
+        return 1
+    fi
+    _have_bridge "$role" || return 1
     local cmd=("zrt-teleops-ros2-$role" --ros-args
                --params-file "$_config/bridge.yaml" -r "__ns:=/$role")
     # Quoted so an all-digit id stays a string.
