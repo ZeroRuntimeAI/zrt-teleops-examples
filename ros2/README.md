@@ -18,8 +18,9 @@ zrt-teleops-ros2-leader  ◀── video + state ──  zrt-teleops-ros2-follow
                          ─── actions ───────▶     ▲ /follower/joint_states
 ```
 
-There are no nodes of our own here: a URDF, controller configs, two launch
-files and some shell shortcuts. One arm per machine, or both on one machine.
+There are no nodes of our own here: a URDF, controller configs and two launch
+files in one ament package, `so101_teleop_bringup`, and some shell shortcuts.
+One arm per machine, or both on one machine.
 Read Troubleshooting below before the first run on real arms.
 
 ## Needs
@@ -33,8 +34,10 @@ The ROS packages, all from the ROS apt repository:
 ```bash
 sudo apt install ros-jazzy-ros2-control ros-jazzy-ros2-controllers \
     ros-jazzy-controller-manager ros-jazzy-feetech-ros2-driver \
-    ros-jazzy-xacro ros-jazzy-robot-state-publisher
+    ros-jazzy-xacro ros-jazzy-robot-state-publisher ros-dev-tools
 ```
+
+(`ros-dev-tools` is colcon and rosdep, to build the workspace.)
 
 The SDK goes into the **same Python ROS uses** (`/usr/bin/python3`, 3.12),
 because the bridge imports `rclpy`, which comes from apt, not pip. Ubuntu
@@ -82,30 +85,43 @@ offset and limits into the servo itself, so the middle pose reads about
 in ROS. The bridge still reads the JSON (`calibration_profile` and
 `robot_id`) to scale each joint against its calibrated range.
 
+Then, still in `ros2/` (the workspace root; `bringup/` is the package),
+build once:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths . --ignore-src -y   # new to rosdep? sudo rosdep init && rosdep update
+colcon build --symlink-install
+```
+
+`--symlink-install` links the installed files back to `bringup/`, so an
+edit to a config, URDF or launch file applies at the next launch without a
+rebuild. Only a new file needs one.
+
 ## Run
 
-Every new shell: `source ros2/env.sh` (and your venv, if you used one).
+Two terminals on each machine. T1 brings the arm up and joins the meeting,
+and stays in the foreground with the logs; T2 is for commands.
 
-On the follower machine:
-
-```bash
-follower_up
-```
-
-On the leader machine:
+T1, in `ros2/` (`leader.launch.py` on the leader machine):
 
 ```bash
-leader_up
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+source ~/zrt-venv/bin/activate    # if you used the venv
+set -a; source .env; set +a
+ros2 launch so101_teleop_bringup follower.launch.py
 ```
 
-Each starts the arm stack — driver and controllers — in the background,
-logging to `.run/<role>_arm.log`, waits for its controller, then starts the
-bridge in the background too, logging to `.run/<role>_bridge.log`, and gives
-the prompt back once it has joined the meeting. Both keep running when you
-close the terminal or the ssh session. The leader arm is declared with no command
+The port and calibration id come from `.env` (`ZRT_FOLLOWER_PORT` /
+`ZRT_FOLLOWER_ID`, `ZRT_LEADER_*` on the leader); `usb_port:=` and
+`robot_id:=` override them. The leader arm is declared with no command
 interface, so the driver never enables its torque and it stays limp in your
 hand. The follower is stiff as soon as the driver loads, holding where it
 was.
+
+T2, in `ros2/`: `source env.sh`, then the shortcuts below. Each is one
+`ros2 service call` (see `env.sh`), so the raw call works too.
 
 Then, on the leader machine:
 
@@ -128,19 +144,33 @@ lining up. To require the arms to match first, set `max_misalignment` in
 `bridge.yaml` (0.05 = 5 % of travel); `arm` is then refused while any joint
 differs by more, and the refusal names the joint.
 
-Leaving and stopping, on either machine:
+Leaving and stopping:
 
 ```bash
+follower_leave   # T2: leave the meeting; the arm holds its last position
+follower_join    # T2: rejoin
+```
+
+Ctrl-C in the follower's T1 leaves the meeting AND stops the driver:
+torque OFF, the arm drops. Support it first. `leader_leave` and
+`leader_join` are the same on the leader machine, where Ctrl-C is harmless:
+the leader is limp anyway.
+
+### In the background instead
+
+`env.sh` can also run both halves detached, so they survive a closed
+terminal or ssh session. One shell, `source env.sh` (and the venv), then:
+
+```bash
+follower_up     # leader_up on the leader machine: the arm stack, then the bridge
 follower_logs   # follow the bridge's log; Ctrl-C stops only the tail
-follower_down   # leave the meeting; the arm stack keeps running
+follower_down   # leave the meeting; the arm stack keeps running, follower_up rejoins
 follower_off    # leave, then stop the stack: torque OFF, the arm drops. Support it first.
 ```
 
-`leader_logs`, `leader_down` and `leader_off` are the same on the leader
-machine; the leader is limp anyway. After `follower_down` the follower holds
-its last position, and `follower_up` rejoins, reusing the running stack.
-
-Anything after `follower_up` / `leader_up` goes to `ros2 launch`, e.g.
+They run the launch files straight from `bringup/`, no build needed, and log
+to `.run/<role>_arm.log` and `.run/<role>_bridge.log`. Anything after
+`follower_up` / `leader_up` goes to `ros2 launch`, e.g.
 `follower_up usb_port:=/dev/ttyACM1`.
 
 ## Recording and cameras
@@ -160,10 +190,10 @@ record_off
 ```
 
 For a cloud copy as well, set `cloud_recording: true` in the follower
-machine's `bridge.yaml` and restart the follower bridge (`follower_down`,
-then `follower_up`). `record_on` then records locally and in VideoSDK's
-cloud; episodes wait until the cloud recorder is ready. `follower_logs`
-shows each `cloud recording:` state.
+machine's `bridge.yaml` and restart the follower bridge: relaunch T1
+(supporting the arm), or `follower_down` then `follower_up`. `record_on`
+then records locally and in VideoSDK's cloud; episodes wait until the cloud
+recorder is ready. The bridge's log shows each `cloud recording:` state.
 
 ## Without arms
 
@@ -199,7 +229,7 @@ camera on `/diagnostics` (OK, WARN on missed reads, ERROR on a reopen), so
 ## Topics and services
 
 All under the bridge node, `/<role>/zrt_teleop_bridge/...`. Stock types
-only, so nothing to build: anything structured is JSON in a
+only, no interfaces to build: anything structured is JSON in a
 `std_msgs/String`, and arguments a `Trigger` cannot carry are parameters
 (`ros2 param set` first).
 
@@ -209,6 +239,7 @@ only, so nothing to build: anything structured is JSON in a
 | both | `stats` | pub `std_msgs/String` | stats JSON every `1/stats_hz` s |
 | both | `active_operator` | pub `std_msgs/String`, latched | who may hold the lease; empty = first come |
 | both | `estop` | srv `Trigger` | latch an e-stop |
+| both | `join` | srv `SetBool` | leave (`false`) / rejoin (`true`) the meeting; the arm stack keeps running |
 | both | `set_active_operator` / `clear_active_operator` | srv `Trigger` | hand control to param `active_operator_id` / clear it |
 | both | `rpc_call` | srv `Trigger` | call `rpc_method` on `rpc_peer` with `rpc_payload` (JSON); refused while armed |
 | leader | `enable` | srv `SetBool` | arm / disarm |
@@ -305,8 +336,9 @@ not up, or a name is off. `ros2 control list_controllers -c
 /follower/controller_manager` should show `joint_state_broadcaster` (and
 `forward_controller`) active; `ros2 topic list` should include
 `/leader/joint_states`, `/follower/joint_states` and
-`/follower/forward_controller/commands`. The stack's own output is in
-`.run/<role>_arm.log`, the bridge's in `.run/<role>_bridge.log`.
+`/follower/forward_controller/commands`. T1 shows the stack's and the
+bridge's output; in the background flow they are in `.run/<role>_arm.log`
+and `.run/<role>_bridge.log`.
 
 **`arm` is refused as misaligned.** Only with `max_misalignment` > 0: read
 the message, move the leader. To see
@@ -337,6 +369,7 @@ but RViz does, and wants `package://` or `file://` URIs. Not set up here.
 
 ```
 env.sh                       shortcuts; source it
+bringup/package.xml          the so101_teleop_bringup package, with CMakeLists.txt
 bringup/launch/              leader.launch.py, follower.launch.py
 bringup/urdf/                so101.urdf.xacro + TheRobotStudio's URDFs (Apache-2.0, see NOTICE)
 bringup/config/              controllers, bridge params

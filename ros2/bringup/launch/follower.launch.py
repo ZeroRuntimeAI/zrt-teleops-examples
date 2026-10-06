@@ -2,7 +2,12 @@
 The follower machine: one SO-101 driven over ros2_control, and the bridge
 that takes commands from the room and sends it video and state back.
 
-    ros2 launch bringup/launch/follower.launch.py usb_port:=/dev/ttyACM0 robot_id:=my_follower
+Two terminals. T1 brings the arm up and joins the meeting, and stays in
+the foreground:
+
+    ros2 launch so101_teleop_bringup follower.launch.py
+
+T2 is for commands: `source env.sh`, then record_on, follower_estop, ...
 
 Everything lives under /follower:
     /follower/joint_states                    joint_state_broadcaster -> bridge
@@ -12,14 +17,17 @@ Everything lives under /follower:
     /follower/zrt_teleop_bridge/clear_estop   clear it (only here, on purpose)
     /follower/zrt_teleop_bridge/recording     start / stop recording (SetBool)
     /follower/zrt_teleop_bridge/episode       start / end an episode (SetBool)
+    /follower/zrt_teleop_bridge/join          leave (false) / rejoin (true) the meeting
 
 When the room goes quiet the bridge stops publishing and forward_controller
-holds the last command: the arm holds, it does not fall. Stopping THIS
-launch is different: the driver turns torque off and the arm drops
-(support it first; `follower_off` warns before doing this).
+holds the last command: the arm holds, it does not fall. Ctrl-C on THIS
+launch is different: it stops the driver too, torque goes off and the arm
+DROPS (support it first). To leave the meeting with the arm still holding,
+`follower_leave` from T2 (~/join false); `follower_join` rejoins.
 
-Args: hardware:=feetech|mock, usb_port, robot_id,
-bridge:=true|false (false to run the bridge yourself, e.g. under a debugger).
+Args: hardware:=feetech|mock, usb_port (default $ZRT_FOLLOWER_PORT),
+robot_id (default $ZRT_FOLLOWER_ID), bridge:=true|false (false to run the
+bridge yourself, e.g. under a debugger).
 """
 
 import os
@@ -28,6 +36,7 @@ import xacro
 import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
+from launch.substitutions import EnvironmentVariable
 from launch_ros.actions import Node
 
 ROLE = "follower"
@@ -93,8 +102,11 @@ def setup(context):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("hardware", default_value="feetech"),
-        DeclareLaunchArgument("usb_port", default_value="/dev/ttyACM0"),
-        DeclareLaunchArgument("robot_id", default_value=""),
+        # From .env, so T1 needs no args.
+        DeclareLaunchArgument("usb_port", default_value=EnvironmentVariable(
+            "ZRT_FOLLOWER_PORT", default_value="/dev/ttyACM0")),
+        DeclareLaunchArgument("robot_id", default_value=EnvironmentVariable(
+            "ZRT_FOLLOWER_ID", default_value="")),
         DeclareLaunchArgument("bridge", default_value="true"),
         OpaqueFunction(function=setup),
     ])

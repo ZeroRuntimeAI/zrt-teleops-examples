@@ -87,6 +87,9 @@ fake_chunk() {
 arm()    { ros2 service call /leader$_bridge/enable std_srvs/srv/SetBool "{data: true}"; }
 disarm() { ros2 service call /leader$_bridge/enable std_srvs/srv/SetBool "{data: false}"; }
 estop()  { ros2 service call /leader$_bridge/estop std_srvs/srv/Trigger; }
+# Leave / rejoin the meeting; the bridge and the arm stack keep running.
+leader_leave() { ros2 service call /leader$_bridge/join std_srvs/srv/SetBool "{data: false}"; }
+leader_join()  { ros2 service call /leader$_bridge/join std_srvs/srv/SetBool "{data: true}"; }
 
 # -- the follower machine ------------------------------------------------------
 follower_estop() { ros2 service call /follower$_bridge/estop std_srvs/srv/Trigger; }
@@ -98,6 +101,9 @@ episode_off() { ros2 service call /follower$_bridge/episode std_srvs/srv/SetBool
 # Close the open episode with an outcome stored alongside it.
 episode_success() { ros2 service call /follower$_bridge/episode_end std_srvs/srv/SetBool "{data: true}"; }
 episode_fail()    { ros2 service call /follower$_bridge/episode_end std_srvs/srv/SetBool "{data: false}"; }
+# Leave / rejoin the meeting; the arm stack keeps running, so the arm holds.
+follower_leave() { ros2 service call /follower$_bridge/join std_srvs/srv/SetBool "{data: false}"; }
+follower_join()  { ros2 service call /follower$_bridge/join std_srvs/srv/SetBool "{data: true}"; }
 
 # -- watching, either machine --------------------------------------------------
 # One JSON object per message: events as they happen, stats once a second.

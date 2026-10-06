@@ -2,18 +2,27 @@
 The leader machine: one SO-101 read over ros2_control, and the bridge that
 sends it into the room.
 
-    ros2 launch bringup/launch/leader.launch.py usb_port:=/dev/ttyACM0 robot_id:=my_leader
+Two terminals. T1 brings the arm up and joins the meeting, and stays in
+the foreground:
+
+    ros2 launch so101_teleop_bringup leader.launch.py
+
+T2 is for commands: `source env.sh`, then arm, disarm, estop, ...
 
 Everything lives under /leader:
     /leader/joint_states                 joint_state_broadcaster -> bridge
     /leader/zrt_teleop_bridge/enable     arm / disarm (std_srvs/SetBool)
     /leader/zrt_teleop_bridge/estop      latch an e-stop on the follower
+    /leader/zrt_teleop_bridge/join       leave (false) / rejoin (true) the meeting
 
 The arm is declared state-only (no command interface), so the driver never
-enables torque and it stays limp in your hand.
+enables torque and it stays limp in your hand: Ctrl-C on this launch is
+harmless. `leader_leave` / `leader_join` from T2 (~/join) leave and rejoin
+without stopping it.
 
-Args: hardware:=feetech|mock, usb_port, robot_id,
-bridge:=true|false (false to run the bridge yourself, e.g. under a debugger).
+Args: hardware:=feetech|mock, usb_port (default $ZRT_LEADER_PORT),
+robot_id (default $ZRT_LEADER_ID), bridge:=true|false (false to run the
+bridge yourself, e.g. under a debugger).
 """
 
 import os
@@ -21,6 +30,7 @@ import os
 import xacro
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
+from launch.substitutions import EnvironmentVariable
 from launch_ros.actions import Node
 
 ROLE = "leader"
@@ -71,8 +81,11 @@ def setup(context):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("hardware", default_value="feetech"),
-        DeclareLaunchArgument("usb_port", default_value="/dev/ttyACM0"),
-        DeclareLaunchArgument("robot_id", default_value=""),
+        # From .env, so T1 needs no args.
+        DeclareLaunchArgument("usb_port", default_value=EnvironmentVariable(
+            "ZRT_LEADER_PORT", default_value="/dev/ttyACM0")),
+        DeclareLaunchArgument("robot_id", default_value=EnvironmentVariable(
+            "ZRT_LEADER_ID", default_value="")),
         DeclareLaunchArgument("bridge", default_value="true"),
         OpaqueFunction(function=setup),
     ])
