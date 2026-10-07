@@ -1,0 +1,44 @@
+# Builds ros2/ for amd64 and arm64 and pushes it to
+# ghcr.io/zeroruntimeai/zrt-teleops-ros2 (latest, the commit SHA, the git tag).
+name: ros2 image
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]  # path filters do not apply to tag pushes
+    paths:
+      - ros2/**
+      - .github/workflows/ros2-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/zeroruntimeai/zrt-teleops-ros2
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long,prefix=
+            type=ref,event=tag
+      - uses: docker/build-push-action@v6
+        with:
+          context: ros2
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

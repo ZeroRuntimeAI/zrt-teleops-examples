@@ -4,7 +4,7 @@ that takes commands from the room and sends it video and state back.
 
     ros2 launch so101_teleop_bringup follower.launch.py
 
-Then, in a second terminal, `source env.sh` for start_recording,
+Then, in a command terminal, `source env.sh` for start_recording,
 follower_estop, ...
 
 When the room goes quiet the arm holds its last command. Ctrl-C HERE stops

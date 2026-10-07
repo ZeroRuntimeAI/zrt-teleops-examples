@@ -1,0 +1,34 @@
+# docker compose up -d follower (leader on the leader machine), then
+# docker compose exec follower bash for the commands. README.md: Docker.
+x-arm: &arm
+  image: ghcr.io/zeroruntimeai/zrt-teleops-ros2:latest
+  build: .
+  network_mode: host  # DDS discovery and WebRTC
+  ipc: host           # Fast DDS shared memory, also between the two containers
+  env_file: .env
+  volumes:
+    # All of /dev with the rules below, not single devices: by-id / by-path
+    # names work, and an arm or camera can be replugged.
+    - /dev:/dev
+    - ./.env:/ws/.env:ro
+    # bridge.yaml and controller edits apply on restart, no rebuild.
+    - ./bringup/config:/ws/install/so101_teleop_bringup/share/so101_teleop_bringup/config:ro
+    - ${HOME}/.cache/huggingface/lerobot/calibration:/root/.cache/huggingface/lerobot/calibration:ro
+    - ./sessions:/ws/sessions
+  device_cgroup_rules:
+    - "c 166:* rmw"  # ttyACM
+    - "c 188:* rmw"  # ttyUSB
+    - "c 81:* rmw"   # cameras
+  # SIGINT is Ctrl-C: ros2 launch passes it on, the bridge leaves the room and
+  # the follower's torque goes off. On Docker's default SIGTERM, ros2 launch
+  # exits at once and everything else in the container is killed.
+  stop_signal: SIGINT
+  stop_grace_period: 20s  # the bridge gets 10 s, then SIGTERM, then 5 s more
+
+services:
+  leader:
+    <<: *arm
+    command: ros2 launch so101_teleop_bringup leader.launch.py
+  follower:
+    <<: *arm
+    command: ros2 launch so101_teleop_bringup follower.launch.py

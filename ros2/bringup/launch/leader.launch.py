@@ -4,7 +4,7 @@ sends it into the room.
 
     ros2 launch so101_teleop_bringup leader.launch.py
 
-Then, in a second terminal, `source env.sh` for take_control,
+Then, in a command terminal, `source env.sh` for take_control,
 release_control, estop, ...
 
 The arm has no command interface, so its torque stays off: Ctrl-C here is

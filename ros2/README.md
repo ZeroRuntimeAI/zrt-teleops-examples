@@ -2,7 +2,8 @@
 
 Two SO-101 arms: you move the leader by hand and the follower copies it over
 the internet. Each arm runs on ROS 2 with ros2_control. The arms can be on
-two machines, or both on one.
+two machines, or both on one. Not on Ubuntu 24.04? See
+[Docker](#docker-any-64-bit-linux).
 
 ## Needs
 
@@ -56,7 +57,8 @@ colcon build --symlink-install
 
 ## Run
 
-Two terminals on each machine. T1 starts the arm and joins the room
+Two terminals on each machine: the launch terminal starts the arm and joins
+the room, the command terminal runs the shortcuts. In the launch terminal
 (`leader.launch.py` on the leader machine):
 
 ```bash
@@ -69,8 +71,8 @@ ros2 launch so101_teleop_bringup follower.launch.py
 ```
 
 The follower arm goes stiff and holds where it is; the leader arm stays
-limp. Wait until T1 prints the bridge's `topics: ...` line on both
-machines, then in T2:
+limp. Wait until the launch terminal prints the bridge's `topics: ...` line
+on both machines, then in the command terminal:
 
 ```bash
 cd ~/zrt-teleops-examples/ros2
@@ -79,7 +81,7 @@ source env.sh
 
 Run `take_control` on the leader machine. The follower copies the leader
 until you run `release_control`. Both arms on one machine: fill in both in
-`.env` and run each launch file in its own T1.
+`.env` and run each launch file in its own launch terminal.
 
 Before the first run on real arms:
 
@@ -89,8 +91,9 @@ Before the first run on real arms:
   match, set `max_misalignment` there (`0.05` = 5 % of travel).
 - After an e-stop, `clear_estop` on the follower machine, then
   `take_control` again. It is refused while the follower is e-stopped.
-- Ctrl-C in the follower's T1 stops the driver: torque goes off and only the
-  gears hold the arm, so a loaded pose can sag or drop. Hold it first.
+- Ctrl-C in the follower's launch terminal stops the driver: torque goes off
+  and only the gears hold the arm, so a loaded pose can sag or drop. Hold it
+  first.
 - To leave with the arm actively holding: `release_control` on the leader, then
   `follower_leave`. The arm holds; `follower_join` rejoins. An e-stop stays
   latched, and a recording is closed and not resumed.
@@ -98,7 +101,7 @@ Before the first run on real arms:
 
 ## Commands
 
-In T2, after `source env.sh`:
+In the command terminal, after `source env.sh`:
 
 | Command | Machine | What it does |
 |---|---|---|
@@ -144,13 +147,14 @@ Until the cloud recorder is ready, episodes are refused; the log shows each
 `cloud recording:` state. If it is not ready within 90 s
 (`cloud_recording_timeout_s`), recording carries on locally only. For local
 only, set `cloud_recording: false` and restart the follower (hold the arm and
-relaunch T1, or `follower_down` then `follower_up`).
+restart the launch, or `follower_down` then `follower_up`).
 
 ## In the background
 
-Instead of T1, `env.sh` can run an arm and its bridge detached, so they
-survive a closed terminal or ssh session. Activate the venv,
-`source env.sh`, then (`leader_*` on the leader machine; nothing drops there):
+Instead of a launch terminal, `env.sh` can run an arm and its bridge
+detached, so they survive a closed terminal or ssh session. Activate the
+venv, `source env.sh`, then (`leader_*` on the leader machine; nothing drops
+there):
 
 ```bash
 follower_up     # the arm, then the bridge
@@ -169,7 +173,7 @@ A policy can drive the follower instead of the leader arm, by publishing
 `/leader/zrt_teleop_bridge/action_chunk`. With the follower running:
 
 ```bash
-policy_up        # leader machine, instead of T1: the bridge, no arm (leader_down to stop)
+policy_up        # leader machine, instead of the launch terminal: the bridge, no arm (leader_down to stop)
 take_control
 fake_chunk 0.3   # one test chunk: shoulder_pan ramps to 0.3 rad over 200 ms
 watch_follower   # follower machine: the commands it gets
@@ -177,6 +181,56 @@ watch_follower   # follower machine: the commands it gets
 
 `ZERORUNTIME_LEADER_ID` must still name a leader calibration on that machine. The
 follower's joints are on `/leader/zrt_teleop_bridge/remote/follower_states`.
+
+## Docker (any 64-bit Linux)
+
+The same stack in a container, so the machine needs neither Ubuntu 24.04
+nor ROS: Raspberry Pi OS 64-bit, Debian, Fedora, Ubuntu 22.04, Jetson
+(JetPack 6), ..., on x86_64 or arm64. A 32-bit OS will not work: the ROS
+images are 64-bit only. Docker Desktop on a Mac cannot reach USB arms or
+cameras, so a Mac can only run `hardware:=mock` or policy mode.
+
+Install Docker (skip if `docker compose version` works), then log out and
+in:
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+```
+
+On each machine:
+
+```bash
+git clone https://github.com/ZeroRuntimeAI/zrt-teleops-examples.git
+cd zrt-teleops-examples/ros2
+cp .env.example .env
+```
+
+Fill in `.env` as in [Setup](#setup); no venv, no colcon build. The
+calibration JSON must be on this machine under
+`~/.cache/huggingface/lerobot/calibration/`: calibrate with
+`lerobot-calibrate` on any machine and copy it here. Then (`leader` on the
+leader machine; both arms on one machine: both):
+
+```bash
+docker compose pull
+docker compose up -d follower
+docker compose logs -f follower      # wait for the bridge's `topics: ...` line; Ctrl-C stops only the logs
+docker compose exec follower bash    # then start_recording, clear_estop, ...
+```
+
+`docker compose up -d <role>` is the launch terminal, `docker compose exec
+<role> bash` the command terminal; the [commands](#commands) are the same.
+
+- `docker compose stop follower` is Ctrl-C in its launch terminal: torque
+  goes off and the arm can sag. Hold it first. `follower_leave` leaves the
+  room with the arm holding.
+- `bringup/config/` is read at each start (`docker compose restart
+  follower`; hold the arm). Other changes under `bringup/` need
+  `docker compose build`, which builds the image here instead of pulling it.
+- Recordings land in `sessions/` here, owned by root.
+- Camera names for `ZERORUNTIME_CAMERAS`:
+  `docker compose run --rm follower python -m zeroruntime.teleops.devices`.
 
 ## Troubleshooting
 
@@ -186,9 +240,9 @@ follower's joints are on `/leader/zrt_teleop_bridge/remote/follower_states`.
 | `usb_port ... does not exist` | the arm is unplugged, or the port moved: use its `/dev/serial/by-id/...` path |
 | `parameter 'robot_id' is required and empty` | the calibration id is empty in `.env` |
 | Every servo `Read timeout` at start | the servo power supply is not connected (USB alone still shows the port) |
-| `Read timeout` mid-session, the follower goes limp | the driver gave up on the arm. Support it and restart the follower (relaunch T1, or `follower_off` then `follower_up`). If it happens again, set `update_rate` in both `*_controllers.yaml` and `control_hz` in `bridge.yaml` to 100, and double `max_norm_step` to keep the speed |
-| `take_control` says `no grant within 5.0s` | the follower is not in the room: check its T1, and that both `.env` files have the same room id |
-| The bridge warns `nothing publishes ...` | the arm is not up: check T1, and `ros2 control list_controllers -c /follower/controller_manager` |
+| `Read timeout` mid-session, the follower goes limp | the driver gave up on the arm. Support it and restart the follower (restart the launch, or `follower_off` then `follower_up`). If it happens again, set `update_rate` in both `*_controllers.yaml` and `control_hz` in `bridge.yaml` to 100, and double `max_norm_step` to keep the speed |
+| `take_control` says `no grant within 5.0s` | the follower is not in the room: check its launch terminal, and that both `.env` files have the same room id |
+| The bridge warns `nothing publishes ...` | the arm is not up: check the launch terminal, and `ros2 control list_controllers -c /follower/controller_manager` |
 | The wrist turns half a turn on `take_control` | the two wrists were calibrated in different orientations: recalibrate both the same way |
 | Joints read ~3.14 rad off | `offset` 2048 is missing from `bringup/urdf/so101.urdf.xacro`: put it back |
 | The follower ignores all commands after a hand-typed `ros2 topic pub` | a wrong-length command switched `forward_controller` off: `ros2 control switch_controllers -c /follower/controller_manager --activate forward_controller` |
