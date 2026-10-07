@@ -24,8 +24,10 @@
     # travels/s at 200 Hz). Higher means less lag but harder lunges.
     max_norm_step: 0.00375
 
-    # Follower only: cameras, streamed to the leader. Handles are strings:
-    # paths, or QUOTED indices like ['0', '2'] -- an unquoted [0, 2] is refused.
+    # Follower only: cameras, streamed to the leader. Default: every USB camera
+    # attached (cam0, cam1, ...), or those in ZRT_CAMERAS (.env). camera_handles
+    # names them here instead, with labels: device paths, as strings. The
+    # size and rate apply either way.
     # camera_handles: [/dev/video0, /dev/video2]
     # camera_labels: [front, wrist]
     # camera_width: 640

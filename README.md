@@ -18,7 +18,9 @@ The three build on each other. `so101/` swaps the fake arm for a real one
 and changes nothing else; `inference/` swaps the human for a model and
 changes nothing on the robot side at all — its follower is the same
 follower, and does not know a policy is driving it. `ros2/` is `so101/`
-with each arm behind ros2_control instead of lerobot.
+with each arm behind ros2_control instead of lerobot; you drive it with
+`take_control`, `release_control`, `start_recording` and the rest of the
+commands in [`ros2/README.md`](ros2/README.md#run).
 
 ## Install
 
@@ -93,11 +95,18 @@ every time.
   in a single tick, so at 30 Hz a slew of 12 is 360 units/s. It is the first
   number to re-derive on your own hardware, and `ZRT_SLEW=2.0` is the
   setting for a first run with a policy you have not watched before.
+  In `ros2/` it is `max_norm_step` in `bridge.yaml`, a fraction of each
+  joint's range per tick.
 - **Ctrl-c is a real stop.** It releases the deadman, the command stream
   ends, the follower's watchdog runs out and the arm holds where it is. It
   does not fall, and it does not depend on the thing that was driving it
-  agreeing to stop.
+  agreeing to stop. In `ros2/` this holds for the leader, but Ctrl-c on the
+  follower's `ros2 launch` also stops the servo driver: torque goes off and
+  only the gears hold the arm, so a loaded pose can sag. `follower_leave`
+  leaves the room with the arm actively holding.
 - **Arm against a gate.** `ALIGN`, at the top of each leader script,
   refuses to arm until the robot is near the leader's pose. Without it,
   anything standing somewhere else makes the arm travel to meet it the
-  instant you arm.
+  instant you arm. In `ros2/` the gate is `max_misalignment` in
+  `bridge.yaml`, shipped at 0.0 (off): `take_control` makes the follower
+  travel to the leader at the `max_norm_step` limit.

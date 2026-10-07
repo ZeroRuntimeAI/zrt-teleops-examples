@@ -28,10 +28,10 @@ follower_down() { _stop follower_bridge 15 && echo "left the meeting; the follow
                       "holding (forward_controller keeps the last command); follower_off to power it down"; }
 leader_down()   { _stop leader_bridge 15 && echo "left the meeting"; }
 
-# <role>_off leaves and stops the stack. On the follower torque goes off: the arm drops.
+# <role>_off leaves and stops the stack. On the follower torque goes off: the arm can sag.
 follower_off() {
     if _alive follower_arm; then
-        echo "follower_off turns the servos' torque off: the arm DROPS."
+        echo "follower_off turns the servos' torque off: only the gears hold the arm, it can sag or drop."
         read -r -p "Support the arm, then press Enter (Ctrl-C to cancel) " || return 1
     fi
     _off follower
@@ -118,7 +118,7 @@ _alive() { local p; p="$(_pid "$1")" && [ -n "$p" ] \
 # _running ROLE NODE: /ROLE/NODE is up, whoever started it.
 _running() { ros2 node list 2>/dev/null | grep -qx "/$1/$2"; }
 _have_bridge() { command -v "zrt-teleops-ros2-$1" >/dev/null || {
-    echo "zrt-teleops-ros2-$1 not found: activate the venv first (. ~/ros2-venv/bin/activate)"
+    echo "zrt-teleops-ros2-$1 not found: activate the SDK's venv first (e.g. source ~/ros2-venv/bin/activate)"
     return 1; }; }
 
 # _spawn NAME CMD...: CMD in its own session, out of reach of Ctrl-C here and

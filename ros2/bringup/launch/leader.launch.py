@@ -15,6 +15,7 @@ robot_id (default $ZRT_LEADER_ID), bridge:=false to run the bridge yourself.
 """
 
 import os
+import shutil
 
 import xacro
 from launch import LaunchDescription
@@ -35,6 +36,9 @@ def setup(context):
         # One line instead of a driver stack trace.
         if not os.path.exists(arg["usb_port"]):
             raise RuntimeError(f"usb_port {arg['usb_port']} does not exist (unplugged?)")
+    # Before the arm comes up: without the bridge it would never join.
+    if arg["bridge"].lower() == "true" and not shutil.which(f"zrt-teleops-ros2-{ROLE}"):
+        raise RuntimeError(f"zrt-teleops-ros2-{ROLE} not found: activate the SDK's venv first")
 
     urdf = xacro.process_file(
         os.path.join(BRINGUP, "urdf", "so101.urdf.xacro"),
