@@ -8,9 +8,9 @@ The robot side of a session, with no robot -- but with your real cameras.
 whatever they are commanded. Everything else is real, including the video --
 whatever cameras this machine has are opened and published.
 
-Run `leader.py` against it in another terminal, same ZRT_MEETING_ID.
+Run `leader.py` against it in another terminal, same ZERORUNTIME_MEETING_ID.
 
-Needs ZRT_TOKEN and ZRT_MEETING_ID (see .env.example), and opencv for the
+Needs ZERORUNTIME_AUTH_TOKEN and ZERORUNTIME_MEETING_ID (see .env.example), and opencv for the
 cameras: pip install opencv-python.
 
 SETTINGS -- edit the block below the imports:

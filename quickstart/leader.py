@@ -8,7 +8,7 @@ The operator side of a session, with no operator.
 leader arm, a VR headset or a policy would. Everything else is real -- it
 joins the room, claims control, and receives the robot's video and joints.
 
-Start `follower.py` first, same ZRT_MEETING_ID. This sweeps one joint;
+Start `follower.py` first, same ZERORUNTIME_MEETING_ID. This sweeps one joint;
 watch the follower follow it.
 
 Ctrl-c releases the deadman: the far side's watchdog runs out and the arm
@@ -20,7 +20,7 @@ SETTINGS -- edit the block below the imports:
     SWEEP_HZ       how fast it sweeps
     SYNC_BUFFER_MS how long to hold a frame for joint interpolation
 
-Needs ZRT_TOKEN and ZRT_MEETING_ID -- see .env.example.
+Needs ZERORUNTIME_AUTH_TOKEN and ZERORUNTIME_MEETING_ID -- see .env.example.
 """
 
 import math

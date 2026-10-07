@@ -25,7 +25,7 @@
     max_norm_step: 0.00375
 
     # Follower only: cameras, streamed to the leader. Default: every USB camera
-    # attached (cam0, cam1, ...), or those in ZRT_CAMERAS (.env). camera_handles
+    # attached (cam0, cam1, ...), or those in ZERORUNTIME_CAMERAS (.env). camera_handles
     # names them here instead, with labels: device paths, as strings. The
     # size and rate apply either way.
     # camera_handles: [/dev/video0, /dev/video2]
@@ -38,5 +38,6 @@
     # recording_dir: ./sessions
     # episode_task: pick up the cube
     # Also record in VideoSDK's cloud (billed); local-only if it is not up in time.
-    # cloud_recording: true
+    # false: local only.
+    cloud_recording: true
     # cloud_recording_timeout_s: 90.0

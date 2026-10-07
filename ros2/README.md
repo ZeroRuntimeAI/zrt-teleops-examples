@@ -109,6 +109,7 @@ In T2, after `source env.sh`:
 | `clear_estop` | follower | release the e-stop; only the follower side can |
 | `start_recording` / `stop_recording` | follower | start / stop recording |
 | `start_episode` / `end_episode` | follower | open / close an episode by hand |
+| `start_episode "task"` | follower | open an episode with this task, e.g. `start_episode "pick up the orange cube"`; later episodes keep it until you give another |
 | `end_episode success` / `end_episode fail` | follower | close the episode marked as a success or a failure; the data is kept either way |
 | `follower_leave` / `follower_join` | follower | leave the room with the arm holding / rejoin |
 | `leader_leave` / `leader_join` | leader | leave the room, releasing control / rejoin |
@@ -126,14 +127,24 @@ Both happen on the follower machine, set in `bringup/config/bridge.yaml`.
 with the full path. While recording, each `take_control` to
 `release_control` is an episode on its own.
 
-Cameras: every USB camera on the follower is streamed, as `cam0`, `cam1`, ...;
-to choose, set `ZRT_CAMERAS` in `.env` to their `/dev/v4l/by-path/...` names,
-comma-separated (`python -m zeroruntime.teleops.devices` lists them), or `none`.
+Cameras: every USB camera on the follower is streamed, as `cam0`, `cam1`, ...
+To choose, set `ZERORUNTIME_CAMERAS` in `.env` to their names, comma-separated,
+or `none`. To list the names, on the follower machine with the venv active:
 
-Cloud copy: set `cloud_recording: true` and restart the follower (hold the
-arm and relaunch T1, or `follower_down` then `follower_up`). Until the cloud
-recorder is ready, episodes are refused; the log shows each
-`cloud recording:` state.
+```bash
+python -m zeroruntime.teleops.devices
+```
+
+Under `cameras`, copy the right-hand column (`platform-...-video-index0`);
+each name follows the USB port the camera is plugged into. On macOS the names
+are numbers (`0`, `1`, ...) and `opencv-python` must be installed.
+
+Cloud copy: on by default (`cloud_recording: true`; VideoSDK bills it).
+Until the cloud recorder is ready, episodes are refused; the log shows each
+`cloud recording:` state. If it is not ready within 90 s
+(`cloud_recording_timeout_s`), recording carries on locally only. For local
+only, set `cloud_recording: false` and restart the follower (hold the arm and
+relaunch T1, or `follower_down` then `follower_up`).
 
 ## In the background
 
@@ -164,7 +175,7 @@ fake_chunk 0.3   # one test chunk: shoulder_pan ramps to 0.3 rad over 200 ms
 watch_follower   # follower machine: the commands it gets
 ```
 
-`ZRT_LEADER_ID` must still name a leader calibration on that machine. The
+`ZERORUNTIME_LEADER_ID` must still name a leader calibration on that machine. The
 follower's joints are on `/leader/zrt_teleop_bridge/remote/follower_states`.
 
 ## Troubleshooting

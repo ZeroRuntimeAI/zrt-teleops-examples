@@ -9,8 +9,8 @@ Leader host -- run this on the machine holding the leader arm.
 Arms as soon as control is granted, unless ALIGN is set. Ctrl-c releases
 the deadman -- the far arm holds position, it does not fall.
 
-Needs ZRT_TOKEN, ZRT_MEETING_ID, ZRT_LEADER_ID, ZRT_LEADER_PORT -- see
-.env.example.
+Needs ZERORUNTIME_AUTH_TOKEN, ZERORUNTIME_MEETING_ID, ZERORUNTIME_LEADER_ID,
+ZERORUNTIME_LEADER_PORT -- see .env.example.
 
 SETTINGS -- edit the block below the imports:
 
@@ -69,11 +69,11 @@ def _progress():
 
 
 def main() -> None:
-    port = device("ZRT_LEADER_PORT",
+    port = device("ZERORUNTIME_LEADER_PORT",
                   "the serial port of the leader arm; "
                   "`lerobot-find-port` finds it")
     leader = SO101Leader(
-        SO101LeaderConfig(id=calibration_id("ZRT_LEADER_ID", leader=True),
+        SO101LeaderConfig(id=calibration_id("ZERORUNTIME_LEADER_ID", leader=True),
                           port=port)
     )
 

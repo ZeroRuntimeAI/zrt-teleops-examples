@@ -78,7 +78,7 @@ The scripts load `.env` from their own directory, so there is nothing to
 set in your shell wins over the file. `.env` is gitignored — a room token is
 a bearer credential.
 
-The two every example needs are `ZRT_TOKEN` and `ZRT_MEETING_ID` (in
+The two every example needs are `ZERORUNTIME_AUTH_TOKEN` and `ZERORUNTIME_MEETING_ID` (in
 `ros2/`, the SDK's own `ZERORUNTIME_AUTH_TOKEN` and
 `ZERORUNTIME_MEETING_ID`, since the ROS node reads them itself), and both
 ends of a session must use the same room id.
@@ -93,7 +93,7 @@ every time.
 
 - **`slew` is a speed limit in disguise.** It caps how far one joint moves
   in a single tick, so at 30 Hz a slew of 12 is 360 units/s. It is the first
-  number to re-derive on your own hardware, and `ZRT_SLEW=2.0` is the
+  number to re-derive on your own hardware, and `ZERORUNTIME_SLEW=2.0` is the
   setting for a first run with a policy you have not watched before.
   In `ros2/` it is `max_norm_step` in `bridge.yaml`, a fraction of each
   joint's range per tick.

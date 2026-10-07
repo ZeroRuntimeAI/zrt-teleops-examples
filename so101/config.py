@@ -20,21 +20,21 @@ def fix() -> str:
 # searches upward from wherever you happened to run the script.
 load_dotenv(HERE / ".env")
 
-TOKEN = os.getenv("ZRT_TOKEN")
-MEETING_ID = os.getenv("ZRT_MEETING_ID")
-FPS = int(os.getenv("ZRT_FPS", "30"))
+TOKEN = os.getenv("ZERORUNTIME_AUTH_TOKEN")
+MEETING_ID = os.getenv("ZERORUNTIME_MEETING_ID")
+FPS = int(os.getenv("ZERORUNTIME_FPS", "30"))
 
 # By name, not a bare subscript: these are read at import, so this message
 # is all a reader gets.
 if not TOKEN:
-    raise SystemExit("set ZRT_TOKEN -- your access token\n" + fix())
+    raise SystemExit("set ZERORUNTIME_AUTH_TOKEN -- your access token\n" + fix())
 if not MEETING_ID:
-    raise SystemExit("set ZRT_MEETING_ID -- the room id both ends join\n"
+    raise SystemExit("set ZERORUNTIME_MEETING_ID -- the room id both ends join\n"
                      + fix())
 
 #: Max change per joint per tick -- a speed limit. At 30 Hz, 12.0 is
 #: 360 units/s. Use 2.0 for a first run with an unfamiliar policy.
-SLEW = float(os.getenv("ZRT_SLEW", "12.0"))
+SLEW = float(os.getenv("ZERORUNTIME_SLEW", "12.0"))
 
 #: Where `lerobot-calibrate` writes. Several layouts exist across lerobot
 #: versions, so ids are collected from all of them.
@@ -64,7 +64,7 @@ def device(name: str, what: str) -> str:
             f"  a replug. `lerobot-find-port` identifies the right one.")
     # Two arms on one host is a supported setup, and the way it goes wrong
     # is both variables naming the same port.
-    other = "ZRT_LEADER_PORT" if "FOLLOWER" in name else "ZRT_FOLLOWER_PORT"
+    other = "ZERORUNTIME_LEADER_PORT" if "FOLLOWER" in name else "ZERORUNTIME_FOLLOWER_PORT"
     if os.getenv(other) == path:
         raise SystemExit(
             f"{name} and {other} are both\n    {path}\n"

@@ -1,27 +1,27 @@
 # Source this in bash, from anywhere:   source ros2/env.sh
 # Loads ROS 2 Jazzy and .env, then defines the shortcuts below.
 
-ZRT_ROS2="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ZERORUNTIME_ROS2="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source /opt/ros/jazzy/setup.bash
 
-if [ -f "$ZRT_ROS2/.env" ]; then
-    set -a; source "$ZRT_ROS2/.env"; set +a
+if [ -f "$ZERORUNTIME_ROS2/.env" ]; then
+    set -a; source "$ZERORUNTIME_ROS2/.env"; set +a
 else
-    echo "no $ZRT_ROS2/.env -- cp .env.example .env, then fill it in"
+    echo "no $ZERORUNTIME_ROS2/.env -- cp .env.example .env, then fill it in"
 fi
 
 _bridge=/zrt_teleop_bridge
-_config="$ZRT_ROS2/bringup/config"
-_run="$ZRT_ROS2/.run"
+_config="$ZERORUNTIME_ROS2/bringup/config"
+_run="$ZERORUNTIME_ROS2/.run"
 
 # -- join and leave ----------------------------------------------------------
 # <role>_up starts (or reuses) the arm stack, then the bridge, in the
 # background with logs in .run/, and returns once joined. Closing the terminal
 # stops neither. Extra args go to `ros2 launch`, e.g. usb_port:=/dev/ttyACM1.
 follower_up() { _have_bridge follower && _arm_up follower forward_controller hardware:=feetech \
-                    usb_port:="$ZRT_FOLLOWER_PORT" "$@" && _bridge_up follower "$ZRT_FOLLOWER_ID"; }
+                    usb_port:="$ZERORUNTIME_FOLLOWER_PORT" "$@" && _bridge_up follower "$ZERORUNTIME_FOLLOWER_ID"; }
 leader_up()   { _have_bridge leader && _arm_up leader joint_state_broadcaster hardware:=feetech \
-                    usb_port:="$ZRT_LEADER_PORT" "$@" && _bridge_up leader "$ZRT_LEADER_ID"; }
+                    usb_port:="$ZERORUNTIME_LEADER_PORT" "$@" && _bridge_up leader "$ZERORUNTIME_LEADER_ID"; }
 
 # <role>_down leaves the meeting; the arm stack keeps running, so the follower holds.
 follower_down() { _stop follower_bridge 15 && echo "left the meeting; the follower arm keeps" \
@@ -45,10 +45,10 @@ leader_logs()   { tail -n 50 -F "$_run/leader_bridge.log"; }
 # -- no arm ------------------------------------------------------------------
 # follower_up on mock hardware: the commanded position becomes the state.
 follower_mock() { _arm_up follower forward_controller hardware:=mock "$@" \
-                      && _bridge_up follower "$ZRT_FOLLOWER_ID"; }
+                      && _bridge_up follower "$ZERORUNTIME_FOLLOWER_ID"; }
 # The bridge alone, fed by fake_leader. No mock stack: its broadcaster would
 # fight fake_leader on /leader/joint_states.
-leader_mock() { _bridge_up leader "$ZRT_LEADER_ID" "$@"; }
+leader_mock() { _bridge_up leader "$ZERORUNTIME_LEADER_ID" "$@"; }
 # fake_leader [radians]: all six joints at one value (default 0), 50 Hz.
 fake_leader() { local v="${1:-0.0}"; ros2 topic pub -r 50 /leader/joint_states \
                     sensor_msgs/msg/JointState \
@@ -59,7 +59,7 @@ watch_follower() { ros2 topic echo /follower/forward_controller/commands; }
 # -- policy instead of an arm --------------------------------------------------
 # The leader bridge driven by ~/action_chunk instead of an arm. No alignment
 # gate: a policy has no arm to align.
-policy_up() { _bridge_up leader "$ZRT_LEADER_ID" -p leader_source:=policy \
+policy_up() { _bridge_up leader "$ZERORUNTIME_LEADER_ID" -p leader_source:=policy \
                   -p max_misalignment:=0.0 "$@"; }
 # fake_chunk [radians]: one 10-point chunk ramping shoulder_pan to radians
 # (default 0.3). Needs policy_up, then take_control.
@@ -87,7 +87,15 @@ follower_estop() { ros2 service call /follower$_bridge/estop std_srvs/srv/Trigge
 clear_estop()    { ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
 start_recording() { ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
 stop_recording()  { ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
-start_episode()   { ros2 service call /follower$_bridge/start_episode std_srvs/srv/Trigger; }
+# start_episode ["task"]: open an episode; the task stays for the next ones.
+start_episode() {
+    if [ -n "$*" ]; then
+        local q="'"   # YAML-quoted, so a task like "123" or "a: b" stays text
+        ros2 param set /follower$_bridge episode_task "'${*//$q/$q$q}'" \
+            | grep -q '^Set parameter successful' || return 1
+    fi
+    ros2 service call /follower$_bridge/start_episode std_srvs/srv/Trigger
+}
 # end_episode [success|fail]: close the open episode, with an outcome if given.
 end_episode() {
     case "$1" in
@@ -144,7 +152,7 @@ _arm_up() {
              "Use this terminal for commands: take_control, start_recording, ${role}_leave, ${role}_join ..."
         return 1
     else
-        _spawn "${role}_arm" ros2 launch "$ZRT_ROS2/bringup/launch/$role.launch.py" bridge:=false "$@"
+        _spawn "${role}_arm" ros2 launch "$ZERORUNTIME_ROS2/bringup/launch/$role.launch.py" bridge:=false "$@"
         echo "$role arm starting, log: $log"
     fi
     # timeout, or list_controllers waits forever when the stack never came up.

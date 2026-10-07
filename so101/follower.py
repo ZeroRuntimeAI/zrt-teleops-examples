@@ -12,8 +12,8 @@ Nothing here touches the servo bus -- lerobot stays the only owner.
 Every attached camera is published. Name them with CAMERA_LABELS below --
 a policy looks its cameras up by name.
 
-Needs ZRT_TOKEN, ZRT_MEETING_ID, ZRT_FOLLOWER_ID, ZRT_FOLLOWER_PORT -- see
-.env.example.
+Needs ZERORUNTIME_AUTH_TOKEN, ZERORUNTIME_MEETING_ID, ZERORUNTIME_FOLLOWER_ID,
+ZERORUNTIME_FOLLOWER_PORT -- see .env.example.
 
 SETTINGS -- edit the block below the imports:
 
@@ -22,7 +22,7 @@ SETTINGS -- edit the block below the imports:
     FOURCC             camera pixel format
     WATCHDOG_TIMEOUT_S how long silence may last before the arm holds
 
-`slew` is ZRT_SLEW in .env, because it is the one number that changes per
+`slew` is ZERORUNTIME_SLEW in .env, because it is the one number that changes per
 run rather than per rig.
 """
 
@@ -99,12 +99,12 @@ def main() -> None:
     # is really a camera, and importing a module should open nothing.
     cameras = find_cameras()
 
-    port = device("ZRT_FOLLOWER_PORT",
+    port = device("ZERORUNTIME_FOLLOWER_PORT",
                   "the serial port of the follower arm; "
                   "`lerobot-find-port` finds it")
     arm = SO101Follower(
         SO101FollowerConfig(
-            id=calibration_id("ZRT_FOLLOWER_ID", leader=False),
+            id=calibration_id("ZERORUNTIME_FOLLOWER_ID", leader=False),
             port=port,
             cameras={
                 name: OpenCVCameraConfig(index_or_path=handle, fps=FPS,
@@ -122,7 +122,7 @@ def main() -> None:
         robot=arm,
         token=TOKEN,
         safety=SafetyConfig(
-            # ZRT_SLEW. Re-derive on your own arm: too low limits the
+            # ZERORUNTIME_SLEW. Re-derive on your own arm: too low limits the
             # operator's motion, too high lets a bad reading through.
             slew=SLEW,
             watchdog_timeout_s=WATCHDOG_TIMEOUT_S,

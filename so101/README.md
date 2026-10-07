@@ -50,7 +50,7 @@ lerobot-find-cameras opencv
 `lerobot-calibrate` runs once per arm. `lerobot-find-cameras` shows what
 each camera is looking at.
 
-`ZRT_FOLLOWER_ID` and `ZRT_LEADER_ID` are lerobot calibration ids, which are
+`ZERORUNTIME_FOLLOWER_ID` and `ZERORUNTIME_LEADER_ID` are lerobot calibration ids, which are
 filenames: `lerobot-calibrate` writes `<id>.json` and lerobot reads each
 joint's range from it. Leave one blank and the script lists what you have.
 

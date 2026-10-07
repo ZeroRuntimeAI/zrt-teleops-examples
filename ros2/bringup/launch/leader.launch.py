@@ -10,8 +10,8 @@ release_control, estop, ...
 The arm has no command interface, so its torque stays off: Ctrl-C here is
 harmless.
 
-Args: hardware:=feetech|mock, usb_port (default $ZRT_LEADER_PORT),
-robot_id (default $ZRT_LEADER_ID), bridge:=false to run the bridge yourself.
+Args: hardware:=feetech|mock, usb_port (default $ZERORUNTIME_LEADER_PORT),
+robot_id (default $ZERORUNTIME_LEADER_ID), bridge:=false to run the bridge yourself.
 """
 
 import os
@@ -75,9 +75,9 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("hardware", default_value="feetech"),
         DeclareLaunchArgument("usb_port", default_value=EnvironmentVariable(
-            "ZRT_LEADER_PORT", default_value="/dev/ttyACM0")),
+            "ZERORUNTIME_LEADER_PORT", default_value="/dev/ttyACM0")),
         DeclareLaunchArgument("robot_id", default_value=EnvironmentVariable(
-            "ZRT_LEADER_ID", default_value="")),
+            "ZERORUNTIME_LEADER_ID", default_value="")),
         DeclareLaunchArgument("bridge", default_value="true"),
         OpaqueFunction(function=setup),
     ])
