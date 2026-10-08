@@ -83,13 +83,12 @@ _here() { pgrep -f "bin/zrt-teleops-ros2-$1" >/dev/null || {
 # -- the leader machine --------------------------------------------------------
 take_control()    { _here leader take_control && ros2 service call /leader$_bridge/take_control std_srvs/srv/Trigger; }
 release_control() { _here leader release_control && ros2 service call /leader$_bridge/release_control std_srvs/srv/Trigger; }
-estop()           { _here leader estop && ros2 service call /leader$_bridge/estop std_srvs/srv/Trigger; }
 # Leave / rejoin the meeting; the bridge and the arm stack keep running.
 leader_leave() { _here leader leader_leave && ros2 service call /leader$_bridge/leave std_srvs/srv/Trigger; }
 leader_join()  { _here leader leader_join && ros2 service call /leader$_bridge/join std_srvs/srv/Trigger; }
 
 # -- the follower machine ------------------------------------------------------
-follower_estop() { _here follower follower_estop && ros2 service call /follower$_bridge/estop std_srvs/srv/Trigger; }
+follower_estop() { estop; }   # older name for estop
 clear_estop()    { _here follower clear_estop && ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
 start_recording() { _here follower start_recording && ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
 stop_recording()  { _here follower stop_recording && ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
@@ -97,16 +96,18 @@ stop_recording()  { _here follower stop_recording && ros2 service call /follower
 follower_leave() { _here follower follower_leave && ros2 service call /follower$_bridge/leave std_srvs/srv/Trigger; }
 follower_join()  { _here follower follower_join && ros2 service call /follower$_bridge/join std_srvs/srv/Trigger; }
 
-# -- episodes, either machine -------------------------------------------------
-# The follower bridge if it runs on this machine, else the leader's, which
-# asks the follower through the room (works across networks). Either way an
-# episode opens or closes only while the follower is recording.
-_episode_node() {
+# -- either machine ----------------------------------------------------------
+# This machine's bridge: the follower's if it runs here, else the leader's,
+# which reaches the follower through the room (works across networks).
+_this_bridge() {
     if pgrep -f bin/zrt-teleops-ros2-follower >/dev/null; then echo "/follower$_bridge"; else echo "/leader$_bridge"; fi
 }
+# E-stop the follower; it stays latched until clear_estop on the follower.
+estop() { ros2 service call "$(_this_bridge)/estop" std_srvs/srv/Trigger; }
+# Episodes open or close only while the follower is recording.
 # start_episode ["task"]: open an episode; the task stays for the next ones.
 start_episode() {
-    local node; node="$(_episode_node)"
+    local node; node="$(_this_bridge)"
     if [ -n "$*" ]; then
         local q="'"   # YAML-quoted, so a task like "123" or "a: b" stays text
         ros2 param set "$node" episode_task "'${*//$q/$q$q}'" \
@@ -116,7 +117,7 @@ start_episode() {
 }
 # end_episode [success|fail]: close the open episode, with an outcome if given.
 end_episode() {
-    local node; node="$(_episode_node)"
+    local node; node="$(_this_bridge)"
     case "$1" in
         "")      ros2 service call "$node/end_episode" std_srvs/srv/Trigger ;;
         success) ros2 service call "$node/end_episode_success" std_srvs/srv/Trigger ;;

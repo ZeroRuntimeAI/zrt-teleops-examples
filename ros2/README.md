@@ -66,8 +66,8 @@ take_control              # on the leader machine; release_control to stop
 | Command | Machine | What it does |
 |---|---|---|
 | `take_control` / `release_control` | leader | start / stop driving; the follower holds |
-| `estop` / `follower_estop` | leader / follower | e-stop (stays latched) |
-| `clear_estop` | follower | release the e-stop, then `take_control` again |
+| `estop` | either | e-stop the follower (stays latched) |
+| `clear_estop` | either | release the e-stop, then `take_control` again |
 | `start_recording` / `stop_recording` | follower | start / stop recording |
 | `start_episode ["task"]` | either | open an episode, optionally with a task |
 | `end_episode [success\|fail]` | either | close it, optionally with an outcome |
