@@ -78,9 +78,9 @@ gate, a leader arm resting somewhere else makes the far arm travel to meet
 it at full slew the instant you arm. Set it to `None` to arm immediately.
 
 To record, set `RECORD = True` at the top of `follower.py`. Each
-take-control session becomes an episode, recorded to the VideoSDK cloud
+take-control session becomes an episode, recorded to the cloud
 (billed); if the cloud is not up within 90 s, it records under `./sessions`
-instead.
+instead. A local copy is kept there either way.
 
 Arming is a *hold*, not a keypress: the leader is backdrivable, so
 releasing it to press a key drops the arm.

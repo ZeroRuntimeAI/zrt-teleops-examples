@@ -91,7 +91,7 @@ FOURCC = "MJPG"
 #: Silence for this long and the arm holds where it is.
 WATCHDOG_TIMEOUT_S = 0.5
 
-#: Record each take-control session as an episode, to the VideoSDK cloud
+#: Record each take-control session as an episode, to the cloud
 #: (billed). If the cloud recorder is not up within 90 s, it records on this
 #: machine instead, under ./sessions.
 RECORD = False

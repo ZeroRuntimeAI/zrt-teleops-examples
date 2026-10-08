@@ -81,8 +81,8 @@ python smolvla_leader.py
 Settings are a block at the top of each script rather than command-line
 flags — `ALIGN` and `SYNC_BUFFER_MS` on the leader, `SLEW`, the camera
 format and `RECORD` on the follower. `RECORD = True` records each run to the
-VideoSDK cloud (billed); if the cloud is not up within 90 s, it records under
-`./sessions` instead.
+cloud (billed); if the cloud is not up within 90 s, it records under
+`./sessions` instead. A local copy is kept there either way.
 
 Ctrl-c releases the deadman: the command stream stops, the follower's
 watchdog runs out and the arm holds. The model cannot refuse that stop.

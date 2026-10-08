@@ -34,10 +34,10 @@
     # camera_height: 480
     # camera_fps: 30
 
-    # Follower only: where start_recording writes, and each episode's task.
+    # Follower only: the local copy / fallback folder, and each episode's task.
     # recording_dir: ./sessions
     # episode_task: pick up the cube
-    # Also record in VideoSDK's cloud (billed); local-only if it is not up in time.
-    # false: local only.
+    # Recordings go to the cloud (billed); local-only if it is not up
+    # in time (a local copy is kept under recording_dir too). false: local only.
     cloud_recording: true
     # cloud_recording_timeout_s: 90.0
