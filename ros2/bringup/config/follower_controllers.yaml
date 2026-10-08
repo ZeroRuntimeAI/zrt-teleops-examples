@@ -1,0 +1,21 @@
+# `/**/` matches the nodes under /follower; a bare key would not.
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 200  # Hz. Keep equal to control_hz in bridge.yaml.
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    forward_controller:
+      type: forward_command_controller/ForwardCommandController
+
+/**/forward_controller:
+  ros__parameters:
+    # The command array has no names: this ORDER must match joint_names in bridge.yaml.
+    joints:
+      - shoulder_pan
+      - shoulder_lift
+      - elbow_flex
+      - wrist_flex
+      - wrist_roll
+      - gripper
+    interface_name: position
+    # enforce_command_limits stays false: URDF gripper/wrist_roll limits are narrower than calibrated.

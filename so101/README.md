@@ -50,7 +50,7 @@ lerobot-find-cameras opencv
 `lerobot-calibrate` runs once per arm. `lerobot-find-cameras` shows what
 each camera is looking at.
 
-`ZRT_FOLLOWER_ID` and `ZRT_LEADER_ID` are lerobot calibration ids, which are
+`ZERORUNTIME_FOLLOWER_ID` and `ZERORUNTIME_LEADER_ID` are lerobot calibration ids, which are
 filenames: `lerobot-calibrate` writes `<id>.json` and lerobot reads each
 joint's range from it. Leave one blank and the script lists what you have.
 
@@ -76,6 +76,11 @@ flags. In `leader.py`, `ALIGN` is the one to know: it refuses to arm while
 any joint is further than that from the follower's. Keep it — without a
 gate, a leader arm resting somewhere else makes the far arm travel to meet
 it at full slew the instant you arm. Set it to `None` to arm immediately.
+
+To record, set `RECORD = True` at the top of `follower.py`. Each
+take-control session becomes an episode, recorded to the cloud
+(billed); if the cloud is not up within 90 s, it records under `./sessions`
+instead. A local copy is kept there either way.
 
 Arming is a *hold*, not a keypress: the leader is backdrivable, so
 releasing it to press a key drops the arm.

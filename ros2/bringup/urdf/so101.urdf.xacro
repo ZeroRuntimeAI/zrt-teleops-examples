@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<!--
+  One SO-101, leader or follower, on real servos or on mock hardware.
+
+    xacro so101.urdf.xacro role:=follower hardware:=feetech usb_port:=/dev/ttyACM0
+
+  Adds ros2_control to TheRobotStudio's URDF, included unmodified (see NOTICE).
+  The leader gets no command interface, so the driver never enables its torque.
+-->
+<robot name="so101" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="role" default="follower"/>             <!-- leader | follower -->
+  <xacro:arg name="hardware" default="mock"/>             <!-- mock | feetech -->
+  <xacro:arg name="usb_port" default="/dev/ttyACM0"/>
+
+  <xacro:property name="role" value="$(arg role)"/>
+  <xacro:property name="hardware" value="$(arg hardware)"/>
+
+  <xacro:if value="${role == 'leader'}">
+    <xacro:include filename="so101_leader_new_calib.urdf"/>
+  </xacro:if>
+  <xacro:if value="${role == 'follower'}">
+    <xacro:include filename="so101_new_calib.urdf"/>
+  </xacro:if>
+
+  <!-- Servo ids 1..6 in this order. lerobot-calibrate homes the middle pose to
+       ~2048 raw, so offset 2048 makes it 0 rad. Mock ignores it. -->
+  <xacro:macro name="so101_joint" params="name id">
+    <joint name="${name}">
+      <param name="id">${id}</param>
+      <param name="offset">2048</param>
+      <xacro:if value="${role == 'follower'}">
+        <command_interface name="position"/>
+      </xacro:if>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <ros2_control name="so101_${role}" type="system">
+    <hardware>
+      <xacro:if value="${hardware == 'mock'}">
+        <plugin>mock_components/GenericSystem</plugin>
+      </xacro:if>
+      <xacro:if value="${hardware == 'feetech'}">
+        <plugin>feetech_ros2_driver/FeetechHardwareInterface</plugin>
+        <param name="usb_port">$(arg usb_port)</param>
+      </xacro:if>
+    </hardware>
+    <xacro:so101_joint name="shoulder_pan" id="1"/>
+    <xacro:so101_joint name="shoulder_lift" id="2"/>
+    <xacro:so101_joint name="elbow_flex" id="3"/>
+    <xacro:so101_joint name="wrist_flex" id="4"/>
+    <xacro:so101_joint name="wrist_roll" id="5"/>
+    <xacro:so101_joint name="gripper" id="6"/>
+  </ros2_control>
+</robot>

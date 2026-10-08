@@ -1,0 +1,7 @@
+# Read-only: no command controller, so the arm stays limp.
+# `/**/` matches the nodes under /leader; a bare key would not.
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 200  # Hz. Keep equal to control_hz in bridge.yaml.
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster

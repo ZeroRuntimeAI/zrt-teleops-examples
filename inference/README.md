@@ -38,7 +38,7 @@ Then open `.env` and fill it in.
 
 One copy per host: the session lines match, the hardware lines do not.
 
-`ZRT_TASK` is required: SmolVLA is language conditioned, and the string has
+`ZERORUNTIME_TASK` is required: SmolVLA is language conditioned, and the string has
 to match what the checkpoint was trained on.
 
 ## Getting a checkpoint
@@ -49,7 +49,7 @@ right shape — 6 actions:
 ```bash
 hf download un1c0rnio/smolvla_so101_box_pencil4_100000 --local-dir ./ckpt
 python -m lerobot.processor.migrate_policy_normalization --pretrained-path ./ckpt
-# then ZRT_POLICY_PATH=./ckpt_migrated
+# then ZERORUNTIME_POLICY_PATH=./ckpt_migrated
 ```
 
 The middle step is needed for most community checkpoints (the script says
@@ -79,8 +79,10 @@ python smolvla_leader.py
 ```
 
 Settings are a block at the top of each script rather than command-line
-flags — `ALIGN` and `SYNC_BUFFER_MS` on the leader, `SLEW` and the camera
-format on the follower.
+flags — `ALIGN` and `SYNC_BUFFER_MS` on the leader, `SLEW`, the camera
+format and `RECORD` on the follower. `RECORD = True` records each run to the
+cloud (billed); if the cloud is not up within 90 s, it records under
+`./sessions` instead. A local copy is kept there either way.
 
 Ctrl-c releases the deadman: the command stream stops, the follower's
 watchdog runs out and the arm holds. The model cannot refuse that stop.

@@ -70,9 +70,9 @@ def need(name: str, what: str) -> str:
 # searches upward from wherever you happened to run the script.
 load_dotenv(HERE / ".env")
 
-TOKEN = need("ZRT_TOKEN", "your access token")
-MEETING_ID = need("ZRT_MEETING_ID", "the room the follower is in")
-FPS = int(os.getenv("ZRT_FPS", "30"))
+TOKEN = need("ZERORUNTIME_AUTH_TOKEN", "your access token")
+MEETING_ID = need("ZERORUNTIME_MEETING_ID", "the room the follower is in")
+FPS = int(os.getenv("ZERORUNTIME_FPS", "30"))
 
 class PolicyLeader(Leader):
     """A Leader whose joint targets come from the model.
@@ -114,7 +114,7 @@ def load_policy(path: str, task: str):
             f"no config.json in {path}\n"
             f"  That is not a checkpoint directory. A training run writes\n"
             f"    outputs/train/<run>/checkpoints/last/pretrained_model/\n"
-            f"  and it is that directory which goes in ZRT_POLICY_PATH.") from None
+            f"  and it is that directory which goes in ZERORUNTIME_POLICY_PATH.") from None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cfg.device = device
@@ -229,8 +229,8 @@ def _progress():
 
 def main() -> None:
     predict = load_policy(
-        need("ZRT_POLICY_PATH", "the checkpoint directory (with config.json)"),
-        need("ZRT_TASK", "what the policy was trained to do -- SmolVLA is "
+        need("ZERORUNTIME_POLICY_PATH", "the checkpoint directory (with config.json)"),
+        need("ZERORUNTIME_TASK", "what the policy was trained to do -- SmolVLA is "
                          "conditioned on it"))
 
     leader = PolicyLeader(meeting_id=MEETING_ID, token=TOKEN, publish_hz=FPS,
@@ -270,7 +270,7 @@ def main() -> None:
                    if worst else "")
                 + "  This policy wants a pose that far from where the arm is\n"
                   "  standing. Move the arm closer, or set ALIGN = None at\n"
-                  "  the top of this file and lower ZRT_SLEW on the robot.")
+                  "  the top of this file and lower ZERORUNTIME_SLEW on the robot.")
     print("armed, the policy is driving. ctrl-c to stop.")
 
     try:

@@ -1,0 +1,43 @@
+# Bridge parameters, both roles; each ignores the other's keys. The token and
+# room id come from the environment (.env), so nothing secret lands here.
+/**:
+  ros__parameters:
+    # Same joints, same order, on both machines and in follower_controllers.yaml.
+    joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper]
+
+    # Each machine uses its OWN arm's lerobot calibration, found by robot_id.
+    # Or set calibration_file to a JSON.
+    calibration_profile: lerobot_so101_rad
+
+    leader_states_topic: /leader/joint_states
+    follower_states_topic: /follower/joint_states
+    follower_commands_topic: /follower/forward_controller/commands
+
+    # Keep equal to update_rate in the *_controllers.yaml files.
+    control_hz: 200
+
+    # 0.0 arms at once; the follower glides to the leader at max_norm_step.
+    # >0 refuses take_control while any joint is further off (0.05 = 5 % of travel).
+    max_misalignment: 0.0
+
+    # Follower slew: max move per tick, as a fraction of full travel (0.75
+    # travels/s at 200 Hz). Higher means less lag but harder lunges.
+    max_norm_step: 0.00375
+
+    # Follower only: cameras, streamed to the leader. Default: every USB camera
+    # attached (cam0, cam1, ...), or those in ZERORUNTIME_CAMERAS (.env). camera_handles
+    # names them here instead, with labels: device paths, as strings. The
+    # size and rate apply either way.
+    # camera_handles: [/dev/video0, /dev/video2]
+    # camera_labels: [front, wrist]
+    # camera_width: 640
+    # camera_height: 480
+    # camera_fps: 30
+
+    # Follower only: the local copy / fallback folder, and each episode's task.
+    # recording_dir: ./sessions
+    # episode_task: pick up the cube
+    # Recordings go to the cloud (billed); local-only if it is not up
+    # in time (a local copy is kept under recording_dir too). false: local only.
+    cloud_recording: true
+    # cloud_recording_timeout_s: 90.0

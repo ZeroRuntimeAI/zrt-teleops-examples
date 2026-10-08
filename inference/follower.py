@@ -15,8 +15,8 @@ operator talks to, which is the point.
 Every attached camera is published. Name them with CAMERA_LABELS below --
 the policy looks its cameras up by name, so these must match its checkpoint.
 
-Needs ZRT_TOKEN, ZRT_MEETING_ID, ZRT_FOLLOWER_ID, ZRT_FOLLOWER_PORT -- see
-.env.example.
+Needs ZERORUNTIME_AUTH_TOKEN, ZERORUNTIME_MEETING_ID, ZERORUNTIME_FOLLOWER_ID,
+ZERORUNTIME_FOLLOWER_PORT -- see .env.example.
 
 SETTINGS -- edit the block below the imports:
 
@@ -66,6 +66,11 @@ FOURCC = "MJPG"
 
 #: Silence for this long and the arm holds where it is.
 WATCHDOG_TIMEOUT_S = 0.5
+
+#: Record each take-control session as an episode, to the cloud
+#: (billed). If the cloud recorder is not up within 90 s, it records on this
+#: machine instead, under ./sessions.
+RECORD = False
 
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -166,9 +171,9 @@ def explain(exc: Exception) -> SystemExit | None:
     return SystemExit(f"{exc}{note}")
 
 
-TOKEN = need("ZRT_TOKEN", "your access token")
-MEETING_ID = need("ZRT_MEETING_ID", "the room the policy will join")
-FPS = int(os.getenv("ZRT_FPS", "30"))
+TOKEN = need("ZERORUNTIME_AUTH_TOKEN", "your access token")
+MEETING_ID = need("ZERORUNTIME_MEETING_ID", "the room the policy will join")
+FPS = int(os.getenv("ZERORUNTIME_FPS", "30"))
 
 
 def main() -> None:
@@ -178,8 +183,8 @@ def main() -> None:
 
     arm = SO101Follower(
         SO101FollowerConfig(
-            id=calibration_id("ZRT_FOLLOWER_ID"),
-            port=device("ZRT_FOLLOWER_PORT",
+            id=calibration_id("ZERORUNTIME_FOLLOWER_ID"),
+            port=device("ZERORUNTIME_FOLLOWER_PORT",
                         "the serial port of the arm; `lerobot-find-port` "
                         "finds it"),
             cameras={
@@ -203,6 +208,8 @@ def main() -> None:
             # HOLD, not TORQUE_OFF: cutting torque drops a loaded arm.
             on_starvation=FailsafeAction.HOLD,
         ),
+        cloud_recording=True,
+        record="./sessions" if RECORD else None,
     )
 
     @follower.on_safe_state

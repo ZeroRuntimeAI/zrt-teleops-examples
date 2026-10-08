@@ -20,7 +20,7 @@ cp .env.example .env
 
 Then open `.env` and add your token and room id.
 
-Do this on both machines, with the same `ZRT_MEETING_ID`. No `source`
+Do this on both machines, with the same `ZERORUNTIME_MEETING_ID`. No `source`
 needed; the scripts read `.env` from this directory.
 
 Cameras need opencv: `pip install opencv-python`.
