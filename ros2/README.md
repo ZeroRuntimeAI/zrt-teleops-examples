@@ -132,12 +132,19 @@ sent, so watch `follower_events` on the follower to see it happen.
 
 ## Recording and cameras
 
-Both happen on the follower machine, set in `bringup/config/bridge.yaml`.
-`start_recording` writes under `./sessions` (`recording_dir`) and replies
-with the full path. While recording, each `take_control` to
-`release_control` is an episode on its own.
+Recordings go to the VideoSDK cloud (`cloud_recording: true` in
+`bringup/config/bridge.yaml`; VideoSDK bills it). Start one on the follower
+machine with `start_recording`, and wait until its log shows
+`cloud recording: ready`: episodes are refused until then. While recording,
+each `take_control` to `release_control` is an episode on its own, and
+`start_episode` / `end_episode` work from either machine.
 
-Cameras: every USB camera on the follower is streamed, as `cam0`, `cam1`, ...
+If the cloud recorder is not ready within 90 s (`cloud_recording_timeout_s`),
+recording carries on on the follower machine only, under `./sessions`
+(`recording_dir`). A local copy is also kept there while the cloud records.
+To record locally only, set `cloud_recording: false` and restart the follower.
+
+Cameras, on the follower machine: every USB camera is streamed, as `cam0`, `cam1`, ...
 To choose, set `ZERORUNTIME_CAMERAS` in `.env` to their names, comma-separated,
 or `none`. To list the names, on the follower machine with the venv active:
 
@@ -148,13 +155,6 @@ python -m zeroruntime.teleops.devices
 It ends with a ready `ZERORUNTIME_CAMERAS=...` line: copy it into `.env` and
 drop any camera you don't want. Each name follows the USB port the camera is
 plugged into.
-
-Cloud copy: on by default (`cloud_recording: true`; VideoSDK bills it).
-Until the cloud recorder is ready, episodes are refused; the log shows each
-`cloud recording:` state. If it is not ready within 90 s
-(`cloud_recording_timeout_s`), recording carries on locally only. For local
-only, set `cloud_recording: false` and restart the follower (hold the arm and
-restart the launch, or `follower_down` then `follower_up`).
 
 ## In the background
 
