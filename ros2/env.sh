@@ -85,8 +85,12 @@ leader_join()  { ros2 service call /leader$_bridge/join std_srvs/srv/Trigger; }
 # -- the follower machine ------------------------------------------------------
 follower_estop() { ros2 service call /follower$_bridge/estop std_srvs/srv/Trigger; }
 clear_estop()    { ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
-start_recording() { ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
-stop_recording()  { ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
+# Recording runs on the follower machine: say so rather than wait forever.
+_on_follower() { _running follower zrt_teleop_bridge || {
+    echo "$1 runs on the follower machine: run it there (in its command terminal)"
+    return 1; }; }
+start_recording() { _on_follower start_recording && ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
+stop_recording()  { _on_follower stop_recording && ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
 # Leave / rejoin the meeting; the arm stack keeps running, so the arm holds.
 follower_leave() { ros2 service call /follower$_bridge/leave std_srvs/srv/Trigger; }
 follower_join()  { ros2 service call /follower$_bridge/join std_srvs/srv/Trigger; }
@@ -159,7 +163,7 @@ _arm_up() {
     elif _running "$role" controller_manager; then
         # Started by `ros2 launch` elsewhere: a second stack would fight it for the port.
         echo "$role arm already running outside env.sh (ros2 launch?): not starting a second one." \
-             "Use this terminal for commands: take_control, start_recording, ${role}_leave, ${role}_join ..."
+             "Use this terminal for commands: $([ "$role" = leader ] && echo take_control, start_episode || echo start_recording, clear_estop), ${role}_leave, ${role}_join ..."
         return 1
     else
         _spawn "${role}_arm" ros2 launch "$ZERORUNTIME_ROS2/bringup/launch/$role.launch.py" bridge:=false "$@"
