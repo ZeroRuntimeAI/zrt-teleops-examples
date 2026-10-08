@@ -89,7 +89,6 @@ leader_join()  { _here leader leader_join && ros2 service call /leader$_bridge/j
 
 # -- the follower machine ------------------------------------------------------
 follower_estop() { estop; }   # older name for estop
-clear_estop()    { _here follower clear_estop && ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
 start_recording() { _here follower start_recording && ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
 stop_recording()  { _here follower stop_recording && ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
 # Leave / rejoin the meeting; the arm stack keeps running, so the arm holds.
@@ -104,6 +103,8 @@ _this_bridge() {
 }
 # E-stop the follower; it stays latched until clear_estop on the follower.
 estop() { ros2 service call "$(_this_bridge)/estop" std_srvs/srv/Trigger; }
+# Release the e-stop; it goes to the follower's bridge.
+clear_estop() { ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
 # Episodes open or close only while the follower is recording.
 # start_episode ["task"]: open an episode; the task stays for the next ones.
 start_episode() {
@@ -166,7 +167,7 @@ _arm_up() {
     elif _running "$role" controller_manager; then
         # Started by `ros2 launch` elsewhere: a second stack would fight it for the port.
         echo "$role arm already running outside env.sh (ros2 launch?): not starting a second one." \
-             "Use this terminal for commands: $([ "$role" = leader ] && echo take_control, start_episode || echo start_recording, clear_estop), ${role}_leave, ${role}_join ..."
+             "Use this terminal for commands: $([ "$role" = leader ] && echo take_control, start_episode || echo start_recording, stop_recording), ${role}_leave, ${role}_join ..."
         return 1
     else
         _spawn "${role}_arm" ros2 launch "$ZERORUNTIME_ROS2/bringup/launch/$role.launch.py" bridge:=false "$@"
