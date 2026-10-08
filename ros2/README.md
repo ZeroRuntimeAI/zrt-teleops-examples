@@ -138,9 +138,9 @@ or `none`. To list the names, on the follower machine with the venv active:
 python -m zeroruntime.teleops.devices
 ```
 
-Under `cameras`, copy the right-hand column (`platform-...-video-index0`);
-each name follows the USB port the camera is plugged into. On macOS the names
-are numbers (`0`, `1`, ...) and `opencv-python` must be installed.
+It ends with a ready `ZERORUNTIME_CAMERAS=...` line: copy it into `.env` and
+drop any camera you don't want. Each name follows the USB port the camera is
+plugged into.
 
 Cloud copy: on by default (`cloud_recording: true`; VideoSDK bills it).
 Until the cloud recorder is ready, episodes are refused; the log shows each
@@ -184,53 +184,78 @@ follower's joints are on `/leader/zrt_teleop_bridge/remote/follower_states`.
 
 ## Docker (any 64-bit Linux)
 
-The same stack in a container, so the machine needs neither Ubuntu 24.04
-nor ROS: Raspberry Pi OS 64-bit, Debian, Fedora, Ubuntu 22.04, Jetson
-(JetPack 6), ..., on x86_64 or arm64. A 32-bit OS will not work: the ROS
-images are 64-bit only. Docker Desktop on a Mac cannot reach USB arms or
-cameras, so a Mac can only run `hardware:=mock` or policy mode.
+Runs the same thing in a container, so the machine needs no ROS and no
+Ubuntu 24.04: Raspberry Pi OS, Debian, Ubuntu 22.04, Jetson, ... Any
+64-bit Linux works (`dpkg --print-architecture` prints `arm64` or `amd64`).
 
-Install Docker (skip if `docker compose version` works), then log out and
-in:
+**1. Install Docker** (skip if `docker compose version` works):
 
 ```bash
 curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
+sudo usermod -aG docker $USER      # then log out and back in
 ```
 
-On each machine:
+**2. Get the example and fill in `.env`:**
 
 ```bash
+cd ~
 git clone https://github.com/ZeroRuntimeAI/zrt-teleops-examples.git
-cd zrt-teleops-examples/ros2
+cd ~/zrt-teleops-examples/ros2
 cp .env.example .env
+nano .env
 ```
 
-Fill in `.env` as in [Setup](#setup); no venv, no colcon build. The
-calibration JSON must be on this machine under
-`~/.cache/huggingface/lerobot/calibration/`: calibrate with
-`lerobot-calibrate` on any machine and copy it here. Then (`leader` on the
-leader machine; both arms on one machine: both):
+Fill in the token, the room id, and this machine's arm: its port
+(`ls /dev/serial/by-id/`) and its calibration id. Same as [Setup](#setup).
+
+**3. Copy the arm's calibration here.** Calibrate with `lerobot-calibrate`
+on any machine, then put the file in the same place on this one:
+
+```
+~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json        # follower
+~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/<id>.json   # leader
+```
+
+**4. Start it**, on each machine with the role of its arm. Both arms on
+one machine: run both.
 
 ```bash
-docker compose pull
-docker compose up -d follower
-docker compose logs -f follower      # wait for the bridge's `topics: ...` line; Ctrl-C stops only the logs
-docker compose exec follower bash    # then start_recording, clear_estop, ...
+cd ~/zrt-teleops-examples/ros2
+docker compose pull                # first time, and to update
+
+docker compose up -d follower      # on the follower machine
+docker compose logs -f follower    # wait for `topics: ...`, then Ctrl-C (stops only the log)
+
+docker compose up -d leader        # on the leader machine
+docker compose logs -f leader
 ```
 
-`docker compose up -d <role>` is the launch terminal, `docker compose exec
-<role> bash` the command terminal; the [commands](#commands) are the same.
+**5. Commands**, in a second terminal on the same machine:
 
-- `docker compose stop follower` is Ctrl-C in its launch terminal: torque
-  goes off and the arm can sag. Hold it first. `follower_leave` leaves the
-  room with the arm holding.
-- `bringup/config/` is read at each start (`docker compose restart
-  follower`; hold the arm). Other changes under `bringup/` need
-  `docker compose build`, which builds the image here instead of pulling it.
-- Recordings land in `sessions/` here, owned by root.
+```bash
+cd ~/zrt-teleops-examples/ros2
+docker compose exec follower bash  # on the follower machine: clear_estop, start_recording, ...
+docker compose exec leader bash    # on the leader machine: take_control, release_control, ...
+```
+
+The [commands](#commands) are the same as in the native setup; the table
+says which machine each one runs on.
+
+**Stop:** `docker compose stop follower` or `docker compose stop leader`.
+This is Ctrl-C: on the follower, torque goes off and the arm can sag, so
+hold it first; the leader is limp anyway. After a reboot, run step 4 again.
+
+Good to know:
+
+- After editing `bringup/config/` (e.g. `bridge.yaml`):
+  `docker compose restart follower` or `restart leader` (hold the follower).
 - Camera names for `ZERORUNTIME_CAMERAS`:
   `docker compose run --rm follower python -m zeroruntime.teleops.devices`.
+- Recordings land in `~/zrt-teleops-examples/ros2/sessions/`.
+- `follower_up`, `policy_up` and the other [background](#in-the-background)
+  shortcuts are for the native setup; in Docker, use `docker compose`.
+- If `docker compose pull` fails, build the image here instead (~10 min):
+  `docker compose build`.
 
 ## Troubleshooting
 
@@ -248,3 +273,4 @@ docker compose exec follower bash    # then start_recording, clear_estop, ...
 | The follower ignores all commands after a hand-typed `ros2 topic pub` | a wrong-length command switched `forward_controller` off: `ros2 control switch_controllers -c /follower/controller_manager --activate forward_controller` |
 | Joining fails with `Server config request failed with status 404` | the room id does not exist on this server, e.g. it was made on another VideoSDK environment: make a room with the same token |
 | Joining fails with `Missing transport id` | the server accepted the room but could not set up media: try a new room id; if it persists, it is on the server side |
+| Installing Docker fails with `Not live until ...` | the clock is wrong (common on a Pi): `sudo timedatectl set-ntp true`, check `date -u`, retry |

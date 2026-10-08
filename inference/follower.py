@@ -67,6 +67,11 @@ FOURCC = "MJPG"
 #: Silence for this long and the arm holds where it is.
 WATCHDOG_TIMEOUT_S = 0.5
 
+#: Record each take-control session as an episode, to the VideoSDK cloud
+#: (billed). If the cloud recorder is not up within 90 s, it records on this
+#: machine instead, under ./sessions.
+RECORD = False
+
 # ───────────────────────────────────────────────────────────────────────────
 
 # From THIS directory, not the working directory -- a bare load_dotenv()
@@ -203,6 +208,8 @@ def main() -> None:
             # HOLD, not TORQUE_OFF: cutting torque drops a loaded arm.
             on_starvation=FailsafeAction.HOLD,
         ),
+        cloud_recording=True,
+        record="./sessions" if RECORD else None,
     )
 
     @follower.on_safe_state

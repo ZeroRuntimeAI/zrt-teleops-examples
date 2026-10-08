@@ -1,5 +1,6 @@
-# docker compose up -d follower (leader on the leader machine), then
-# docker compose exec follower bash for the commands. README.md: Docker.
+# docker compose up -d follower on the follower machine, leader on the leader
+# machine, then docker compose exec <same role> bash for the commands.
+# README.md: Docker.
 x-arm: &arm
   image: ghcr.io/zeroruntimeai/zrt-teleops-ros2:latest
   build: .
