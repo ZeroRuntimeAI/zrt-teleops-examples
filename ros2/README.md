@@ -56,9 +56,8 @@ cd ~/zrt-teleops-examples/ros2 && source env.sh
 take_control              # on the leader machine; release_control to stop
 ```
 
-- The follower moves straight to the leader's pose on `take_control` (a full
-  sweep takes ~1.3 s). To refuse until the arms match, set `max_misalignment`
-  in `bringup/config/bridge.yaml` (`0.05` = 5 % of travel).
+- On `take_control` the follower moves straight to the leader's pose, so
+  line the arms up first.
 - Ctrl-C in the follower's launch terminal turns torque off: hold the arm
   first. To leave with the arm holding, use `follower_leave`.
 
@@ -81,11 +80,10 @@ networks; they take effect only while the follower is recording.
 
 ## Recording and cameras
 
-Recordings go to the cloud (billed): run `start_recording` on the follower
-machine and wait for `cloud recording: ready`. Each `take_control` to
-`release_control` is then an episode. If the cloud is not up within 90 s, it
-records under `./sessions` only; a local copy is kept there anyway.
-`cloud_recording: false` in `bridge.yaml` records locally only.
+Recordings are saved to the cloud. Start one with `start_recording` on the
+follower machine; each time you take and release control is one episode. If
+the cloud is not available, the recording is saved on the follower machine
+instead.
 
 Cameras: the follower streams every USB camera. To choose, run
 `python -m zeroruntime.teleops.devices` (venv active) and copy the
@@ -93,14 +91,8 @@ Cameras: the follower streams every USB camera. To choose, run
 
 ## In the background
 
-`env.sh` can run an arm and its bridge detached, instead of a launch
-terminal (no colcon build needed; logs in `.run/`):
-
-```bash
-follower_up       # start; follower_logs to watch
-follower_down     # leave the room, arm holding; follower_up rejoins
-follower_off      # stop the arm: torque off, hold it first
-```
+Instead of a launch terminal: `follower_up` to start, `follower_down` to
+leave the room with the arm holding, `follower_off` to stop (hold the arm).
 
 ## Policy mode
 
