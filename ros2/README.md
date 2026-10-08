@@ -111,9 +111,9 @@ In the command terminal, after `source env.sh`:
 | `follower_estop` | follower | e-stop from the follower side (stays latched) |
 | `clear_estop` | follower | release the e-stop; only the follower side can |
 | `start_recording` / `stop_recording` | follower | start / stop recording |
-| `start_episode` / `end_episode` | follower | open / close an episode by hand |
-| `start_episode "task"` | follower | open an episode with this task, e.g. `start_episode "pick up the orange cube"`; later episodes keep it until you give another |
-| `end_episode success` / `end_episode fail` | follower | close the episode marked as a success or a failure; the data is kept either way |
+| `start_episode` / `end_episode` | either | open / close an episode by hand (see below) |
+| `start_episode "task"` | either | open an episode with this task, e.g. `start_episode "pick up the orange cube"`; later `start_episode` calls on that machine keep it until you give another |
+| `end_episode success` / `end_episode fail` | either | close the episode marked as a success or a failure; the data is kept either way |
 | `follower_leave` / `follower_join` | follower | leave the room with the arm holding / rejoin |
 | `leader_leave` / `leader_join` | leader | leave the room, releasing control / rejoin |
 | `follower_events` / `leader_events` | follower / leader | print events as they happen, one JSON per line |
@@ -122,6 +122,13 @@ In the command terminal, after `source env.sh`:
 
 Each is one `ros2` command; `env.sh` shows which. Full reference: the ROS 2
 docs.
+
+The episode commands use the follower's bridge when it runs on this machine's
+ROS graph, else the leader's, which asks the follower through the room, so it
+works across networks. Either way an episode opens or closes only while the
+follower is recording; on the leader the reply only confirms the request was
+sent, so watch `follower_events` on the follower to see it happen.
+`start_recording` / `stop_recording` stay on the follower.
 
 ## Recording and cameras
 

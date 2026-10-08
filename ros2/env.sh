@@ -87,27 +87,37 @@ follower_estop() { ros2 service call /follower$_bridge/estop std_srvs/srv/Trigge
 clear_estop()    { ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
 start_recording() { ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
 stop_recording()  { ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
-# start_episode ["task"]: open an episode; the task stays for the next ones.
-start_episode() {
-    if [ -n "$*" ]; then
-        local q="'"   # YAML-quoted, so a task like "123" or "a: b" stays text
-        ros2 param set /follower$_bridge episode_task "'${*//$q/$q$q}'" \
-            | grep -q '^Set parameter successful' || return 1
-    fi
-    ros2 service call /follower$_bridge/start_episode std_srvs/srv/Trigger
-}
-# end_episode [success|fail]: close the open episode, with an outcome if given.
-end_episode() {
-    case "$1" in
-        "")      ros2 service call /follower$_bridge/end_episode std_srvs/srv/Trigger ;;
-        success) ros2 service call /follower$_bridge/end_episode_success std_srvs/srv/Trigger ;;
-        fail)    ros2 service call /follower$_bridge/end_episode_fail std_srvs/srv/Trigger ;;
-        *)       echo "usage: end_episode [success|fail]"; return 1 ;;
-    esac
-}
 # Leave / rejoin the meeting; the arm stack keeps running, so the arm holds.
 follower_leave() { ros2 service call /follower$_bridge/leave std_srvs/srv/Trigger; }
 follower_join()  { ros2 service call /follower$_bridge/join std_srvs/srv/Trigger; }
+
+# -- episodes, either machine -------------------------------------------------
+# The follower bridge if it runs on this ROS graph, else the leader's, which
+# asks the follower through the room (works across networks). Either way an
+# episode opens or closes only while the follower is recording.
+_episode_node() {
+    if _running follower zrt_teleop_bridge; then echo "/follower$_bridge"; else echo "/leader$_bridge"; fi
+}
+# start_episode ["task"]: open an episode; the task stays for the next ones.
+start_episode() {
+    local node; node="$(_episode_node)"
+    if [ -n "$*" ]; then
+        local q="'"   # YAML-quoted, so a task like "123" or "a: b" stays text
+        ros2 param set "$node" episode_task "'${*//$q/$q$q}'" \
+            | grep -q '^Set parameter successful' || return 1
+    fi
+    ros2 service call "$node/start_episode" std_srvs/srv/Trigger
+}
+# end_episode [success|fail]: close the open episode, with an outcome if given.
+end_episode() {
+    local node; node="$(_episode_node)"
+    case "$1" in
+        "")      ros2 service call "$node/end_episode" std_srvs/srv/Trigger ;;
+        success) ros2 service call "$node/end_episode_success" std_srvs/srv/Trigger ;;
+        fail)    ros2 service call "$node/end_episode_fail" std_srvs/srv/Trigger ;;
+        *)       echo "usage: end_episode [success|fail]"; return 1 ;;
+    esac
+}
 
 # -- watching, either machine --------------------------------------------------
 # One JSON object per message: events as they happen, stats once a second.
