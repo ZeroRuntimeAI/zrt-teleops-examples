@@ -1,13 +1,13 @@
 # ros2
 
 Two SO-101 arms on ROS 2 (ros2_control): you move the leader by hand and the
-follower copies it over the internet. One machine per arm, or both on one.
-Not on Ubuntu 24.04? Use [Docker](#docker-any-64-bit-linux).
+follower copies it over the internet. One machine per arm.
 
 ## Needs
 
 - Ubuntu 24.04 with ROS 2 Jazzy, two SO-101 arms calibrated with
   `lerobot-calibrate`, and a token and room id (the same on both machines).
+- Not on Ubuntu 24.04? Use [Docker](#docker-any-64-bit-linux).
 
 ```bash
 sudo apt install ros-jazzy-ros2-control ros-jazzy-ros2-controllers \
@@ -89,10 +89,6 @@ Cameras: the follower streams every USB camera. To choose, run
 `python -m zeroruntime.teleops.devices` (venv active) and copy the
 `ZERORUNTIME_CAMERAS=...` line it prints into `.env`, or set it to `none`.
 
-## In the background
-
-Instead of a launch terminal: `follower_up` to start, `follower_down` to
-leave the room with the arm holding, `follower_off` to stop (hold the arm).
 
 ## Policy mode
 
@@ -126,8 +122,7 @@ docker compose stop follower        # = Ctrl-C: torque off, hold the arm first
 ```
 
 After editing `bringup/config/` or a reboot: `docker compose up -d <role>`
-again. The background shortcuts (`follower_up`, `policy_up`, ...) are for the
-native setup only.
+again.
 
 ## Troubleshooting
 
@@ -137,9 +132,7 @@ native setup only.
 | `usb_port ... does not exist` | unplugged, or use its `/dev/serial/by-id/...` path |
 | `robot_id is required and empty` | the calibration id is missing in `.env` |
 | Every servo `Read timeout` at start | the arm's power supply is off |
-| `Read timeout` mid-session | support the arm and restart the follower; if it repeats, set `update_rate` (both `*_controllers.yaml`) and `control_hz` (`bridge.yaml`) to 100 and double `max_norm_step` |
 | `take_control`: `no grant within 5.0s` | the follower is not in the room: check its launch terminal and that both `.env` have the same room id |
 | The wrist turns half a turn on `take_control` | the wrists were calibrated differently: recalibrate both the same way |
 | Joining fails with status 404 | the room id does not exist on this server: make one with the same token |
 | `start_recording` says it runs on the follower | run it in the follower machine's command terminal |
-| Installing Docker: `Not live until ...` | the clock is wrong: `sudo timedatectl set-ntp true` |
