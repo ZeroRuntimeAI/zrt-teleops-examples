@@ -74,33 +74,35 @@ fake_chunk() {
           points: [${pts%,}]}"
 }
 
+# One-sided commands run only where that role's bridge runs: on a shared LAN
+# the other machine's would answer, or a call would wait forever.
+_here() { pgrep -f "bin/zrt-teleops-ros2-$1" >/dev/null || {
+    echo "$2 runs on the $1 machine: run it there (in its command terminal)"
+    return 1; }; }
+
 # -- the leader machine --------------------------------------------------------
-take_control()    { ros2 service call /leader$_bridge/take_control std_srvs/srv/Trigger; }
-release_control() { ros2 service call /leader$_bridge/release_control std_srvs/srv/Trigger; }
-estop()           { ros2 service call /leader$_bridge/estop std_srvs/srv/Trigger; }
+take_control()    { _here leader take_control && ros2 service call /leader$_bridge/take_control std_srvs/srv/Trigger; }
+release_control() { _here leader release_control && ros2 service call /leader$_bridge/release_control std_srvs/srv/Trigger; }
+estop()           { _here leader estop && ros2 service call /leader$_bridge/estop std_srvs/srv/Trigger; }
 # Leave / rejoin the meeting; the bridge and the arm stack keep running.
-leader_leave() { ros2 service call /leader$_bridge/leave std_srvs/srv/Trigger; }
-leader_join()  { ros2 service call /leader$_bridge/join std_srvs/srv/Trigger; }
+leader_leave() { _here leader leader_leave && ros2 service call /leader$_bridge/leave std_srvs/srv/Trigger; }
+leader_join()  { _here leader leader_join && ros2 service call /leader$_bridge/join std_srvs/srv/Trigger; }
 
 # -- the follower machine ------------------------------------------------------
-follower_estop() { ros2 service call /follower$_bridge/estop std_srvs/srv/Trigger; }
-clear_estop()    { ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
-# Recording runs on the follower machine: say so rather than wait forever.
-_on_follower() { _running follower zrt_teleop_bridge || {
-    echo "$1 runs on the follower machine: run it there (in its command terminal)"
-    return 1; }; }
-start_recording() { _on_follower start_recording && ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
-stop_recording()  { _on_follower stop_recording && ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
+follower_estop() { _here follower follower_estop && ros2 service call /follower$_bridge/estop std_srvs/srv/Trigger; }
+clear_estop()    { _here follower clear_estop && ros2 service call /follower$_bridge/clear_estop std_srvs/srv/Trigger; }
+start_recording() { _here follower start_recording && ros2 service call /follower$_bridge/start_recording std_srvs/srv/Trigger; }
+stop_recording()  { _here follower stop_recording && ros2 service call /follower$_bridge/stop_recording std_srvs/srv/Trigger; }
 # Leave / rejoin the meeting; the arm stack keeps running, so the arm holds.
-follower_leave() { ros2 service call /follower$_bridge/leave std_srvs/srv/Trigger; }
-follower_join()  { ros2 service call /follower$_bridge/join std_srvs/srv/Trigger; }
+follower_leave() { _here follower follower_leave && ros2 service call /follower$_bridge/leave std_srvs/srv/Trigger; }
+follower_join()  { _here follower follower_join && ros2 service call /follower$_bridge/join std_srvs/srv/Trigger; }
 
 # -- episodes, either machine -------------------------------------------------
-# The follower bridge if it runs on this ROS graph, else the leader's, which
+# The follower bridge if it runs on this machine, else the leader's, which
 # asks the follower through the room (works across networks). Either way an
 # episode opens or closes only while the follower is recording.
 _episode_node() {
-    if _running follower zrt_teleop_bridge; then echo "/follower$_bridge"; else echo "/leader$_bridge"; fi
+    if pgrep -f bin/zrt-teleops-ros2-follower >/dev/null; then echo "/follower$_bridge"; else echo "/leader$_bridge"; fi
 }
 # start_episode ["task"]: open an episode; the task stays for the next ones.
 start_episode() {

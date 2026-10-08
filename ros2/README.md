@@ -135,4 +135,4 @@ again.
 | `take_control`: `no grant within 5.0s` | the follower is not in the room: check its launch terminal and that both `.env` have the same room id |
 | The wrist turns half a turn on `take_control` | the wrists were calibrated differently: recalibrate both the same way |
 | Joining fails with status 404 | the room id does not exist on this server: make one with the same token |
-| `start_recording` says it runs on the follower | run it in the follower machine's command terminal |
+| A command says it runs on the leader / follower machine | run it in that machine's command terminal (the table above says which) |
