@@ -4,7 +4,7 @@ Start so101/follower.py (and your leader) as usual, then in another terminal:
 
     python capture.py                                              # status only: read gripper.pos
     python capture.py --scene CUBE_ON_TABLE --tag center_bright    # save a labelled session
-    python capture.py --model best.pt                              # live YOLO state
+    python capture.py --model best.pt                              # live: cube in box / holding / in workspace
 """
 import argparse
 import json
@@ -19,7 +19,7 @@ from zeroruntime.teleops import Leader, single_group_descriptor
 from zeroruntime.teleops.protocol import Units
 
 import config
-from state import STATES, Debouncer, classify, yolo_to_dets
+from state import STATES, Tracker, classify, yolo_to_dets
 
 #: Sorted, to match the lerobot SO-101 adapter (same as inference/smolvla_leader.py).
 JOINTS = ("elbow_flex", "gripper", "shoulder_lift", "shoulder_pan", "wrist_flex", "wrist_roll")
@@ -61,7 +61,7 @@ model = None
 if args.model:
     from ultralytics import YOLO
     model = YOLO(args.model, task="detect")
-    debounce = Debouncer(config.DEBOUNCE_N)
+    tracker = Tracker(config.DEBOUNCE_N, config.LOST_S)
 
 out_dir = None
 if args.scene:
@@ -90,7 +90,7 @@ try:
             for f in o.images.values():
                 f.release()
         if len(frames) < len(config.CAMERAS):
-            print(f"\rwaiting for cameras: session has {sorted(o.images)}, config wants "
+            print(f"\r\033[Kwaiting for cameras: session has {sorted(o.images)}, config wants "
                   f"{sorted(config.CAMERAS.values())}  ", end="", flush=True)
             continue
         grip = o.joints.get("gripper")
@@ -100,7 +100,8 @@ try:
             dets = {c: yolo_to_dets(r, config.YOLO_CONF) for c, r in zip(frames, results)}
             raw = classify(dets, config.WRIST_HOLD_ROI, grip, config.GRIP_HOLD_BAND,
                            config.FIXED_CAMS, config.WRIST_CAM)
-            stable = debounce.update(raw) or stable
+            stable = tracker.update(raw, time.time()) or stable
+            raw = raw or "can't tell"
             seen = " ".join(
                 f"{c}:{'C' if any(d[0] == 'cube' for d in ds) else '-'}"
                 f"{'B' if any(d[0] == 'box' for d in ds) else '-'}" for c, ds in dets.items())
@@ -116,8 +117,16 @@ try:
             saved += 1
 
         g = "  n/a" if grip is None else f"{grip:5.1f}"
-        print(f"\rgrip {g} | raw {raw:<15} | stable {stable:<15} | {seen} | saved {saved}  ",
-              end="", flush=True)
+        if model is None:
+            status = f"grip {g}"
+        elif stable == "-":
+            status = f"warming up ({config.DEBOUNCE_N} frames) | raw {raw}"
+        else:
+            # The three milestones, from the debounced state. At most one is YES at a time.
+            yn = lambda s: "YES" if stable == s else "no "
+            status = (f"cube in box: {yn('CUBE_IN_BOX')} | holding cube: {yn('CUBE_IN_GRIPPER')} | "
+                      f"cube in workspace: {yn('CUBE_ON_TABLE')} || raw {raw:<15} grip {g} {seen}")
+        print(f"\r\033[K{status} | saved {saved}", end="", flush=True)
 except KeyboardInterrupt:
     print()
 finally:

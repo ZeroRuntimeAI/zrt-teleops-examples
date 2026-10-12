@@ -54,8 +54,13 @@ def build(raw: Path, labels: Path, out: Path, val_every: int) -> dict[str, list[
         if len(sessions) < 2:
             print(f"WARNING: {state_dir.name} has {len(sessions)} session(s): no val session possible")
 
+    val_dir = "val/images"
+    if not splits["val"]:
+        # ultralytics refuses to train without a val set. Validating on train is optimistic.
+        print("WARNING: no held-out sessions (need >= 2 per state): YOLO validates on TRAIN data")
+        val_dir = "train/images"
     # Absolute path: ultralytics may resolve a relative `path` against its own datasets dir.
-    (out / "data.yaml").write_text(f"path: {out.resolve()}\ntrain: train/images\nval: val/images\n"
+    (out / "data.yaml").write_text(f"path: {out.resolve()}\ntrain: train/images\nval: {val_dir}\n"
                                    "names:\n  0: cube\n  1: box\n")
     (out / "val_sessions.txt").write_text("".join(s + "\n" for s in splits["val"]))
     return splits

@@ -21,8 +21,9 @@ YOLO_CONF = 0.5
 # --- State rules (plan.md 1.6). All boxes and regions are normalized 0..1 (x1, y1, x2, y2).
 # "Holding" = wrist-cam cube centre inside WRIST_HOLD_ROI. The wrist cam is rigid on the gripper,
 # so a held cube always lands in the same spot. `python split.py` prints a suggested value.
-WRIST_HOLD_ROI = None
+WRIST_HOLD_ROI = (0.43, 0.43, 0.56, 0.64)  # split.py suggested (0.469, 0.478, 0.516, 0.588); widened for YOLO jitter
 # Optional: also require gripper.pos (0..100) inside this (min, max) band, which fixes
 # "open fingers around the cube" false holds. Read the values from capture.py's status line.
-GRIP_HOLD_BAND = None
+GRIP_HOLD_BAND = (8.0, 13.0)  # measured: closed empty ~2.3, closed on cube ~10.3, open 20-85
 DEBOUNCE_N = 5  # consecutive agreeing frames before the state switches
+LOST_S = 3.0  # seconds of "can't see the cube anywhere" before the state becomes NO_CUBE

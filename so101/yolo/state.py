@@ -22,8 +22,17 @@ def _inside(cube, xyxy):
     return x1 <= cx <= x2 and y1 <= cy <= y2
 
 
+def _contained(cube, xyxy):
+    """Whole cube bbox inside xyxy: stricter than _inside, used for the close-up wrist view."""
+    x1, y1, x2, y2 = xyxy
+    return x1 <= cube[2][0] and y1 <= cube[2][1] and cube[2][2] <= x2 and cube[2][3] <= y2
+
+
 def classify(dets: dict[str, list[tuple]], wrist_roi, gripper_pos=None, grip_band=None,
-             fixed_cams=("top", "side"), wrist_cam="wrist") -> str:
+             fixed_cams=("top", "side"), wrist_cam="wrist") -> str | None:
+    """The state this frame shows, or None when it can't tell (no fixed camera sees the cube and
+    the wrist view doesn't settle it, usually because the arm is in the way). Tracker holds the
+    last state through None frames."""
     if wrist_roi is None:
         raise ValueError("WRIST_HOLD_ROI not set yet (plan.md 1.6, `python split.py` suggests one)")
     wcube = _best(dets.get(wrist_cam, []), "cube")
@@ -43,16 +52,33 @@ def classify(dets: dict[str, list[tuple]], wrist_roi, gripper_pos=None, grip_ban
         return "CUBE_IN_BOX"
     if holding:
         return "CUBE_IN_GRIPPER"
-    if any(_best(d, "cube") for d in dets.values()):
-        return "CUBE_ON_TABLE"
-    return "NO_CUBE"
+    if votes:
+        return "CUBE_ON_TABLE"  # a fixed cam sees the cube outside the box
+    # No fixed cam sees the cube (arm in the way, or it's gone). Only the wrist can settle it.
+    wbox = _best(dets.get(wrist_cam, []), "box")
+    if wcube is not None and wbox is not None:
+        return "CUBE_IN_BOX" if _contained(wcube, wbox[2]) else "CUBE_ON_TABLE"
+    return None
 
 
-class Debouncer:
-    def __init__(self, n: int):
-        self.n, self.stable, self.last, self.count = n, None, None, 0
+class Tracker:
+    """Debounce + hold. The stable state switches only after `n` identical frames in a row. A
+    None frame (can't tell) holds the stable state; after `lost_s` seconds of nothing but None,
+    it counts as NO_CUBE. Returns None until the first state is stable."""
 
-    def update(self, state: str) -> str | None:
+    def __init__(self, n: int, lost_s: float):
+        self.n, self.lost_s = n, lost_s
+        self.stable, self.last, self.count, self.seen_t = None, None, 0, None
+
+    def update(self, state: str | None, t: float) -> str | None:
+        if self.seen_t is None:
+            self.seen_t = t
+        if state is None:
+            if t - self.seen_t < self.lost_s:
+                return self.stable
+            state = "NO_CUBE"
+        else:
+            self.seen_t = t
         self.count = self.count + 1 if state == self.last else 1
         self.last = state
         if self.count >= self.n:
@@ -78,15 +104,19 @@ if __name__ == "__main__":
     assert c({"top": [BOX, IN], "side": [BOX, IN], "wrist": [HELD]}) == "CUBE_IN_GRIPPER"  # held above box
     assert c({"top": [BOX, IN], "side": [BOX, OUT]}) == "CUBE_ON_TABLE"  # disagreement -> not done
     assert c({"top": [BOX, IN], "side": [OUT]}) == "CUBE_ON_TABLE"  # cube but no box = outside
-    assert c({"top": [], "side": [], "wrist": [NEAR]}) == "CUBE_ON_TABLE"  # wrist sees it, not held
-    assert c({"top": [], "side": [], "wrist": [BOX, NEAR]}) == "CUBE_ON_TABLE"  # wrist ignored for in_box
+    assert c({"top": [], "side": [], "wrist": [NEAR]}) is None  # wrist cube, no box to compare: can't tell
+    WBOX = ("box", 0.9, (200, 50, 450, 250))   # wrist-view box around NEAR
+    assert c({"top": [], "side": [], "wrist": [WBOX, NEAR]}) == "CUBE_IN_BOX"  # fixed cams blocked, wrist sees it in box
+    assert c({"top": [], "side": [], "wrist": [("box", 0.9, (0, 0, 100, 100)), NEAR]}) == "CUBE_ON_TABLE"
+    assert c({"top": [], "side": [], "wrist": [("box", 0.9, (300, 50, 450, 250)), NEAR]}) == "CUBE_ON_TABLE"  # only partly in
+    assert c({"top": [BOX, OUT], "wrist": [WBOX, NEAR]}) == "CUBE_ON_TABLE"  # a fixed cam outranks the wrist
     assert c({"top": [BOX, OUT], "side": [BOX]}) == "CUBE_ON_TABLE"
     assert c({"top": [BOX], "side": [BOX], "wrist": [HELD]}) == "CUBE_IN_GRIPPER"  # fixed cams occluded
     assert c({"wrist": [HELD]}, grip=30.0, band=(20, 40)) == "CUBE_IN_GRIPPER"  # closed on cube
-    assert c({"wrist": [HELD]}, grip=80.0, band=(20, 40)) == "CUBE_ON_TABLE"  # pre-grasp, fingers open
-    assert c({"wrist": [HELD]}, grip=None, band=(20, 40)) == "CUBE_ON_TABLE"  # no reading: not held
-    assert c({"top": [BOX], "side": [], "wrist": []}) == "NO_CUBE"
-    assert c({}) == "NO_CUBE"
+    assert c({"top": [BOX, OUT], "wrist": [HELD]}, grip=80.0, band=(20, 40)) == "CUBE_ON_TABLE"  # pre-grasp
+    assert c({"top": [BOX, OUT], "wrist": [HELD]}, grip=None, band=(20, 40)) == "CUBE_ON_TABLE"  # no reading
+    assert c({"top": [BOX], "side": [], "wrist": []}) is None  # nothing sees the cube: can't tell
+    assert c({}) is None
     # highest-conf cube wins
     assert c({"top": [BOX, ("cube", 0.6, OUT[2]), ("cube", 0.95, IN[2])], "side": []}) == "CUBE_IN_BOX"
     try:
@@ -104,10 +134,15 @@ if __name__ == "__main__":
                       xyxyn=T([[1, 2, 3, 4], [5, 6, 7, 8], [9, 9, 9, 9]])))
     assert yolo_to_dets(res, 0.5) == [("cube", 0.9, (1, 2, 3, 4)), ("box", 0.7, (5, 6, 7, 8))]
 
-    d = Debouncer(3)
-    assert [d.update(s) for s in ("A", "A")] == [None, None]
-    assert d.update("A") == "A"
-    assert [d.update(s) for s in ("B", "A", "B", "B")] == ["A"] * 4  # flicker doesn't switch
-    assert d.update("B") == "B"
+    d = Tracker(3, lost_s=2.0)
+    assert [d.update(s, 0) for s in ("A", "A")] == [None, None]
+    assert d.update("A", 0) == "A"
+    assert [d.update(s, 0) for s in ("B", "A", "B", "B")] == ["A"] * 4  # flicker doesn't switch
+    assert d.update("B", 0) == "B"
+    assert [d.update(None, t) for t in (0.5, 1.0, 1.9)] == ["B"] * 3  # can't tell: hold
+    assert d.update("B", 2.5) == "B"                                   # seen again: timer resets
+    assert [d.update(None, t) for t in (3.0, 4.6, 4.7, 4.8)] == ["B", "B", "B", "NO_CUBE"]  # lost 2 s, then debounced
+    e = Tracker(2, lost_s=1.0)
+    assert [e.update(None, t) for t in (0, 0.5, 1.0, 1.1)] == [None, None, None, "NO_CUBE"]  # empty from the start
 
     print("state.py OK")

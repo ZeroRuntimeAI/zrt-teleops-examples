@@ -49,20 +49,20 @@ def selftest():
 
 
 def session_frames(sess_dir: Path):
-    """Yield (idx, gripper_pos, {cam: jpg path}) in idx order, skipping idx with a missing camera image."""
+    """Yield (idx, t, gripper_pos, {cam: jpg path}) in idx order, skipping idx with a missing camera image."""
     state, sess = sess_dir.parent.name, sess_dir.name
     rows = [json.loads(line) for line in (sess_dir / "meta.jsonl").read_text().splitlines() if line.strip()]
     for r in sorted(rows, key=lambda r: r["idx"]):
         paths = {cam: sess_dir / f"{state}__{sess}__{cam}__{r['idx']:05d}.jpg" for cam in config.CAMERAS}
         if all(p.exists() for p in paths.values()):
-            yield r["idx"], r.get("gripper_pos"), paths
+            yield r["idx"], r["t"], r.get("gripper_pos"), paths
 
 
 def main(a):
     if config.WRIST_HOLD_ROI is None:
         raise SystemExit("Set WRIST_HOLD_ROI in config.py first (`python split.py` suggests one).")
     from ultralytics import YOLO
-    from state import STATES, yolo_to_dets, classify, Debouncer
+    from state import STATES, yolo_to_dets, classify, Tracker
 
     if a.all:
         sessions = sorted(f"{p.parent.name}/{p.name}" for p in RAW.glob("*/*") if p.is_dir())
@@ -80,16 +80,16 @@ def main(a):
     raw_pairs, deb_pairs, per_session = [], [], []
     for s in sessions:
         truth = s.split("/")[0]
-        deb = Debouncer(config.DEBOUNCE_N)
+        deb = Tracker(config.DEBOUNCE_N, config.LOST_S)
         n_raw, ok = len(raw_pairs), [0, 0]  # debounced [correct, total]
-        for idx, grip, paths in session_frames(RAW / s):
+        for idx, t, grip, paths in session_frames(RAW / s):
             cams = list(paths)
             results = model([str(paths[c]) for c in cams], verbose=False)
             dets = {c: yolo_to_dets(r, config.YOLO_CONF) for c, r in zip(cams, results)}
             pred = classify(dets, config.WRIST_HOLD_ROI, grip, config.GRIP_HOLD_BAND,
                             config.FIXED_CAMS, config.WRIST_CAM)
-            raw_pairs.append((truth, pred))
-            stable = deb.update(pred)
+            raw_pairs.append((truth, pred or "UNSURE"))  # None = can't tell this frame
+            stable = deb.update(pred, t)
             if stable is not None:
                 deb_pairs.append((truth, stable))
                 ok[0] += stable == truth
@@ -97,7 +97,7 @@ def main(a):
         print(f"{s}: {len(raw_pairs) - n_raw} frames, debounced {ok[0]}/{ok[1]}")
         per_session.append((ok[0] / ok[1] if ok[1] else 0.0, s, ok))
 
-    report("RAW", raw_pairs, STATES)
+    report("RAW (UNSURE = can't tell; the tracker holds the last state)", raw_pairs, STATES + ("UNSURE",))
     report("DEBOUNCED", deb_pairs, STATES)
     print("\nworst 5 sessions (debounced accuracy):")
     for acc, s, ok in sorted(per_session)[:5]:

@@ -73,6 +73,19 @@ Hard negatives (plan.md 1.3), labelled with their TRUE state:
 
 ## e. Label
 
+**Fast path: auto-label (no drawing).** The cube is labelled by its bright-orange colour (thresholds
+measured on this rig), and the box by YOLO-World:
+
+```bash
+python autolabel.py --preview    # writes data/labels/, check data/autolabel_preview.jpg
+```
+
+Cube-session frames where no cube was found are left unlabelled, and `split.py` skips them. It
+only works while nothing else on the table is bright orange. If the scene changes, check the
+preview, or hand-label as below.
+
+**Hand-labelling:**
+
 Copy `data/yolo_raw/` to your labelling tool (CVAT / Label Studio / Roboflow). Label boxes
 `cube` and `box` (objects, not states), with class order `0=cube`, `1=box`. Export in **YOLO**
 format and put every `.txt` flat in `data/labels/` on the Jetson. Tool-added prefixes or suffixes

@@ -119,7 +119,11 @@ Starting target: about 100 frames per state per camera. Add more where evaluatio
     cube" band.
   - `in_box` = cube centre inside the box on the fixed cams, with no fixed cam seeing the
     cube outside, **and** not `holding`
-  - Order: `IN_BOX` → `IN_GRIPPER` → `ON_TABLE` → `NO_CUBE`
+  - Order: `IN_BOX` → `IN_GRIPPER` → `ON_TABLE`. If no fixed cam sees the cube (usually the arm
+    is in the way), the wrist decides when it sees both cube and box. Otherwise the frame is
+    "can't tell", and `Tracker` holds the last state. Only after `LOST_S` seconds of seeing
+    nothing does it become `NO_CUBE`. Added after the first eval: `IN_BOX` was 50% because the
+    arm hides the box from the top camera.
 - [ ] Debounce: switch state only after `DEBOUNCE_N` consecutive agreeing frames.
 - [ ] `eval_state.py`: run `state.py` on the held-out frames and print a confusion matrix
       against the scene labels.
