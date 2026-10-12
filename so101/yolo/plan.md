@@ -121,8 +121,9 @@ Starting target: about 100 frames per state per camera. Add more where evaluatio
     cube outside, **and** not `holding`
   - Order: `IN_BOX` → `IN_GRIPPER` → `ON_TABLE`. If no fixed cam sees the cube (usually the arm
     is in the way), the wrist decides when it sees both cube and box. Otherwise the frame is
-    "can't tell", and `Tracker` holds the last state. Only after `LOST_S` seconds of seeing
-    nothing does it become `NO_CUBE`. Added after the first eval: `IN_BOX` was 50% because the
+    "can't tell", and `Tracker` holds the last state. `NO_CUBE` needs the top camera to see the
+    box with no cube in it. If the box is hidden too (arm over it), it's "can't tell", and
+    `NO_CUBE` only comes after `LOST_S` seconds. Added after the first eval: `IN_BOX` was 50% because the
     arm hides the box from the top camera.
 - [ ] Debounce: switch state only after `DEBOUNCE_N` consecutive agreeing frames.
 - [ ] `eval_state.py`: run `state.py` on the held-out frames and print a confusion matrix
@@ -136,6 +137,17 @@ Starting target: about 100 frames per state per camera. Add more where evaluatio
 ---
 
 ## Stage 2: Train the policies (pi0.5)
+
+> **Decided (2026-10-12):** recording, dataset conversion and fine-tuning all run on the
+> **VideoSDK platform** (its `Pi05Trainer`, base `lerobot/pi05_base`, on VideoSDK GPUs).
+> **Expert-only** fine-tune (`freeze_vision_encoder=true`, `train_expert_only=true`), not
+> LoRA, so the output is a complete LeRobot pi0.5 checkpoint. Only episodes ended with **`s`**
+> (`success=true`) are trained on. Episodes are recorded with `so101/leader.py` keys
+> (n/s/f/d/q), and the task text comes from `ZERORUNTIME_TASK`. Camera labels are set by USB port
+> in `follower.py` `CAMERA_PORTS`, using pi0.5's own names: 2.1 top → `base_0_rgb`, 2.3 wrist →
+> `left_wrist_0_rgb`, 2.4 side → `right_wrist_0_rgb`. The dataset therefore matches `pi05_base`
+> with no `CAMERA_MAP`, and `follower.py` refuses to start if one is missing. The cloud-L4
+> steps below are superseded where they conflict.
 
 **Policy A, pick:** `"pick up the cube"`. The episode starts with the arm at home or in a
 varied pose and the cube on the table. It ends with the cube lifted a few cm.

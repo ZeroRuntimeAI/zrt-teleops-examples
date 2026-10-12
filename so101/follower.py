@@ -57,9 +57,22 @@ def works(handle) -> bool:
 def find_cameras() -> dict:
     """Every attached camera, as `{label: handle}`.
 
-    Named by CAMERA_LABELS in discovery order, falling back to cam0, cam1...
+    With CAMERA_PORTS set, each camera is named by the USB port it is plugged
+    into, and a missing one stops the script. A dataset recorded with a camera
+    missing would otherwise shift the names onto the wrong views. Without it,
+    named by CAMERA_LABELS in discovery order, falling back to cam0, cam1...
     """
     found = [d for d in available_cameras() if works(_handle(d))]
+    if CAMERA_PORTS:
+        cams = {label: _handle(d) for d in found
+                for port, label in CAMERA_PORTS.items() if port in d.path}
+        missing = [f"{label} (USB {port})" for port, label in CAMERA_PORTS.items()
+                   if label not in cams]
+        if missing:
+            sys.exit("camera not found: " + ", ".join(missing) +
+                     "\n  check its cable (`lsusb`, `ls /dev/v4l/by-path`); refusing "
+                     "to record with the wrong views under these names")
+        return cams
     return {(CAMERA_LABELS[i] if i < len(CAMERA_LABELS) else f"cam{i}"):
             _handle(d) for i, d in enumerate(found)}
 
@@ -81,6 +94,16 @@ def _handle(d):
 #: the mapping printed at startup and reorder if a replug shuffled them.
 CAMERA_LABELS: list[str] = []
 
+#: Name cameras by USB port instead (a substring of their /dev/v4l/by-path
+#: name), which survives a missing camera. Overrides CAMERA_LABELS. These names
+#: become the dataset's camera keys and so the policy's inputs: they are
+#: pi0.5's own (pi05_base), so the dataset needs no remapping to train it.
+CAMERA_PORTS: dict[str, str] = {
+    "usb-0:2.1:": "base_0_rgb",          # top view
+    "usb-0:2.3:": "left_wrist_0_rgb",    # wrist (Xitech)
+    "usb-0:2.4:": "right_wrist_0_rgb",   # side view (pi0.5 has 3 slots; this is the third)
+}
+
 #: What each camera is asked for.
 WIDTH, HEIGHT = 640, 480
 
@@ -95,6 +118,11 @@ WATCHDOG_TIMEOUT_S = 0.5
 #: (billed). If the cloud recorder is not up within 90 s, it records on this
 #: machine instead, under ./sessions.
 RECORD = False
+
+#: Episodes are opened and closed by leader.py, carrying its task text
+#: (ZERORUNTIME_TASK): a policy is conditioned on that text. True lets the
+#: runtime open untitled episodes on every deadman squeeze instead.
+AUTO_EPISODE = False
 
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -145,6 +173,8 @@ def main() -> None:
     @follower.on_rejected
     def _(seq, why):
         print(f"  rejected seq={seq}: {why}")
+
+    follower.auto_episode = AUTO_EPISODE   # read at start(), so set it first
 
     print(f"robot ready in {MEETING_ID}")
     print(f"  joints  {follower.joints}")

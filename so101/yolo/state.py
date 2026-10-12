@@ -29,10 +29,11 @@ def _contained(cube, xyxy):
 
 
 def classify(dets: dict[str, list[tuple]], wrist_roi, gripper_pos=None, grip_band=None,
-             fixed_cams=("top", "side"), wrist_cam="wrist") -> str | None:
+             fixed_cams=("top", "side"), wrist_cam="wrist", box_view_cam="top") -> str | None:
     """The state this frame shows, or None when it can't tell (no fixed camera sees the cube and
     the wrist view doesn't settle it, usually because the arm is in the way). Tracker holds the
-    last state through None frames."""
+    last state through None frames. `box_view_cam` is the one camera that sees INTO the box: from
+    the side, the walls hide a cube inside even when the box itself is visible."""
     if wrist_roi is None:
         raise ValueError("WRIST_HOLD_ROI not set yet (plan.md 1.6, `python split.py` suggests one)")
     wcube = _best(dets.get(wrist_cam, []), "cube")
@@ -58,6 +59,10 @@ def classify(dets: dict[str, list[tuple]], wrist_roi, gripper_pos=None, grip_ban
     wbox = _best(dets.get(wrist_cam, []), "box")
     if wcube is not None and wbox is not None:
         return "CUBE_IN_BOX" if _contained(wcube, wbox[2]) else "CUBE_ON_TABLE"
+    # No cube anywhere. Only call it NO_CUBE if the camera that sees into the box sees the box
+    # (so it would see a cube in it). Box hidden too = the arm is covering it: can't tell.
+    if wcube is None and _best(dets.get(box_view_cam, []), "box") is not None:
+        return "NO_CUBE"
     return None
 
 
@@ -115,7 +120,9 @@ if __name__ == "__main__":
     assert c({"wrist": [HELD]}, grip=30.0, band=(20, 40)) == "CUBE_IN_GRIPPER"  # closed on cube
     assert c({"top": [BOX, OUT], "wrist": [HELD]}, grip=80.0, band=(20, 40)) == "CUBE_ON_TABLE"  # pre-grasp
     assert c({"top": [BOX, OUT], "wrist": [HELD]}, grip=None, band=(20, 40)) == "CUBE_ON_TABLE"  # no reading
-    assert c({"top": [BOX], "side": [], "wrist": []}) is None  # nothing sees the cube: can't tell
+    assert c({"top": [BOX], "side": [BOX], "wrist": []}) == "NO_CUBE"  # top sees an empty box
+    assert c({"top": [], "side": [BOX], "wrist": []}) is None  # box hidden from top (arm): can't tell
+    assert c({"top": [BOX], "wrist": [NEAR]}) is None  # wrist sees a cube somewhere: not NO_CUBE
     assert c({}) is None
     # highest-conf cube wins
     assert c({"top": [BOX, ("cube", 0.6, OUT[2]), ("cube", 0.95, IN[2])], "side": []}) == "CUBE_IN_BOX"

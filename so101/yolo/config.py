@@ -7,10 +7,9 @@ from pathlib import Path
 SDK_ENV = Path(__file__).resolve().parent.parent / ".env"
 WATCH_HZ = 10
 
-# Our camera name -> the label follower.py publishes. follower.py names cameras cam0, cam1, ...
-# in USB-port order (/dev/v4l/by-path, sorted): port 2.1 = top, 2.3 = wrist, 2.4 = side.
-# Stable while the cables stay in the same ports. Never rename our keys: stage 2/3 use them.
-CAMERAS = {"top": "cam0", "wrist": "cam1", "side": "cam2"}
+# Our camera name -> the label follower.py publishes. follower.py names cameras by USB port
+# (CAMERA_PORTS), using pi0.5's own names, which are also the dataset's camera keys.
+CAMERAS = {"top": "base_0_rgb", "wrist": "left_wrist_0_rgb", "side": "right_wrist_0_rgb"}
 FIXED_CAMS = ("top", "side")
 WRIST_CAM = "wrist"
 
@@ -26,4 +25,4 @@ WRIST_HOLD_ROI = (0.43, 0.43, 0.56, 0.64)  # split.py suggested (0.469, 0.478, 0
 # "open fingers around the cube" false holds. Read the values from capture.py's status line.
 GRIP_HOLD_BAND = (8.0, 13.0)  # measured: closed empty ~2.3, closed on cube ~10.3, open 20-85
 DEBOUNCE_N = 5  # consecutive agreeing frames before the state switches
-LOST_S = 3.0  # seconds of "can't see the cube anywhere" before the state becomes NO_CUBE
+LOST_S = 15.0  # fallback: seconds of "can't tell" before NO_CUBE (longest arm-over-box gap seen: 9.5 s)
