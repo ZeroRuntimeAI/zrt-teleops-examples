@@ -1,112 +1,192 @@
-# zrt robotics examples
+# Zero Runtime teleoperation examples
 
-Runnable teleoperation examples. One robot moves, one thing drives it, and a
-room in between carries the video one way and the actions the other.
+Runnable examples for [`zeroruntime-teleops`](https://pypi.org/project/zeroruntime-teleops/):
+drive a robot arm over the internet from another arm, from your own code, or
+from a policy. Live video, safety limits and dataset recording are built in.
 
-| Directory | Needs | What it shows |
+[Docs](https://docs.zeroruntime.ai/robotics/overview) ·
+[Python SDK reference](https://docs.zeroruntime.ai/robotics/api-reference/python/overview) ·
+[Troubleshooting](https://docs.zeroruntime.ai/robotics/guides/troubleshooting) ·
+[Discord](https://discord.gg/f2WsNDN9S5)
+
+```
+LEADER (drives)                          ROOM                       FOLLOWER (moves)
+───────────────                                                     ────────────────
+a person on a leader arm  ── joint targets ─────────────────▶   safety gates ─▶ motors
+your code, or a policy    ◀── camera video + joint state ─────   cameras, recording
+```
+
+Every session has two sides that join the same **room**. The **follower** runs
+on the robot. It owns the motors, the cameras, the safety checks and the
+recording. The **leader** runs wherever the operator is, which can be another
+machine, network or country. It asks for control and streams the pose the
+robot should move to.
+
+## Contents
+
+- [Pick an example](#pick-an-example)
+- [Key terms](#key-terms)
+- [Get started](#get-started): requirements, credentials, install, first run
+- [Configuration](#configuration)
+- [Safety](#safety)
+- [Build your own](#build-your-own)
+- [Troubleshooting](#troubleshooting)
+
+## Pick an example
+
+| Example | Hardware | Machines | Platform | What it shows |
+|---|---|---|---|---|
+| [`quickstart/`](quickstart/) | none (webcams optional) | 1 or 2 | Linux, macOS | A full session with simulated arms on both ends |
+| [`so101/`](so101/) | 2× SO-101 arms | 1 or 2 | Linux, macOS | Drive a real arm from a real arm, through LeRobot |
+| [`inference/`](inference/) | 1× SO-101 + a SmolVLA checkpoint | 2 | Linux, macOS | A policy drives the arm instead of a person |
+| [`ros2/`](ros2/) | 2× SO-101 arms | 2 | Ubuntu 24.04 + ROS 2 Jazzy, or Docker on any 64-bit Linux | The `so101/` session, with each arm behind ros2_control |
+
+**Start with `quickstart/`, whatever hardware you have.** It runs the same
+session a real rig runs, without the servos. It is the fastest way to confirm
+that your token, your room and your network work before an arm is involved.
+
+Each example changes one thing from the one before it:
+
+- **`quickstart/` → `so101/`** replaces the simulated arms with real ones.
+  The session code is the same.
+- **`so101/` → `inference/`** replaces the person with a model. The robot side
+  is unchanged: the follower cannot tell a policy from a human, and applies
+  the same limits to both.
+- **`so101/` → `ros2/`** keeps the session but puts each arm behind
+  ros2_control instead of LeRobot.
+
+## Key terms
+
+| Term | Meaning |
+|---|---|
+| **Follower** | The robot side. Moves, streams its cameras and joint positions, enforces safety, records. It decides who may drive. |
+| **Leader** | The driving side: a leader arm, your code, a VR headset or a policy. Streams joint targets. |
+| **Room** | The session both sides join, identified by a room id (`ZERORUNTIME_MEETING_ID`). |
+| **Control** | Only one leader drives at a time. The leader calls `claim_control()`, and the follower grants or denies it. |
+| **Deadman** | The leader's "I am driving" switch (`hold_deadman(True)`). Release it and the follower stops applying commands. |
+| **Watchdog** | If no command arrives for `watchdog_timeout_s` (0.5 s in these examples), the follower holds position. |
+| **Slew** | The maximum change per joint per control tick. In effect, a speed limit. |
+| **Alignment gate** | Optional check that refuses to arm until the leader's pose is close to the follower's. |
+| **Episode** | One recorded segment of a session: one training sample in the exported dataset. |
+
+## Get started
+
+### Requirements
+
+| You run | Python | Install |
 |---|---|---|
-| [`quickstart/`](quickstart/) | a room id and a token | both ends of a real session, with no arm on either end |
-| [`so101/`](so101/) | two SO-101 arms, lerobot, two hosts | driving a real arm from a real arm, over the internet |
-| [`inference/`](inference/) | one SO-101, plus a SmolVLA checkpoint | a policy driving the arm instead of a person |
-| [`ros2/`](ros2/) | two SO-101 arms, ROS 2 Jazzy on Ubuntu 24.04 | the `so101/` session with ros2_control on each arm |
+| `quickstart/` | 3.10+ | `pip install -r requirements.txt` |
+| `so101/` | 3.12+ (LeRobot 0.6.1 needs it) | add `pip install "zeroruntime-teleops[lerobot]"` |
+| `inference/` | 3.12+ | add `pip install "lerobot[smolvla]"` on top of `so101/` |
+| `ros2/` | 3.12, the Python ROS 2 Jazzy runs on | see [`ros2/README.md`](ros2/README.md#needs) |
 
-Start with `quickstart/` whatever hardware you have. It is the same session a
-real rig runs, minus the servos, so it is the fastest way to find out whether
-your token, your room and your network are right before an arm is involved.
+| OS | Architecture |
+|---|---|
+| Linux | x86_64, aarch64 (Raspberry Pi, Jetson) |
+| macOS | arm64 |
 
-The three build on each other. `so101/` swaps the fake arm for a real one
-and changes nothing else; `inference/` swaps the human for a model and
-changes nothing on the robot side at all — its follower is the same
-follower, and does not know a policy is driving it. `ros2/` is `so101/`
-with each arm behind ros2_control instead of lerobot; you drive it with
-`take_control`, `release_control`, `start_recording` and the rest of the
-commands in [`ros2/README.md`](ros2/README.md#run).
+### 1. Get a token and a room id
 
-## Install
+Every example needs two values. Both ends of a session use the same ones.
 
+| Variable | What it is | Where it comes from |
+|---|---|---|
+| `ZERORUNTIME_AUTH_TOKEN` | Your access token. It is a bearer credential, so keep it out of git. | [The dashboard](https://app.videosdk.live/signup) |
+| `ZERORUNTIME_MEETING_ID` | The room both ends join | Created once, with the command below |
 
- For running the `quickstart/`.
+Rooms are created through the API. An id you invent is rejected. After you
+install (step 2), create one:
+
 ```bash
-git clone https://github.com/ZeroRuntimeAI/zrt-teleops-examples.git && cd zrt-teleops-examples
+export ZERORUNTIME_AUTH_TOKEN="your-token"
+python -c "from zeroruntime.teleops.rooms import create_room; print(create_room())"
+```
+
+It prints a room id like `abcd-efgh-ijkl`. Reuse it for as long as you like.
+
+### 2. Install
+
+```bash
+git clone https://github.com/ZeroRuntimeAI/zrt-teleops-examples.git
+cd zrt-teleops-examples
 
 python3 -m venv .venv
 source .venv/bin/activate
-
-pip install -r requirements.txt
+pip install -r requirements.txt          # enough for quickstart/
 ```
 
- For `so101/`, add the SO-101 adapters:
+For the hardware examples, add the extras from the [requirements table](#requirements).
+`ros2/` installs into the Python that ROS 2 runs on, not this venv.
 
-```bash
-pip install "zeroruntime-teleops[lerobot]"
-```
+### 3. Run the quickstart
 
-For `inference/`, add SmolVLA on top of that:
-
-```bash
-pip install "lerobot[smolvla]"
-```
-
-`so101/` and `inference/` need Python 3.12 or newer.
-
-For `ros2/`, install into the Python ROS 2 Jazzy uses, not this venv —
-[`ros2/README.md`](ros2/README.md#needs) has the details:
-
-```bash
-pip install "zeroruntime-teleops[ros2]"
-```
-
-| OS    | Architecture     |
-|-------|------------------|
-| Linux | x86_64, aarch64  |
-| macOS | arm64    |
-
-
-## Credentials
-
-Every directory ships a `.env.example`. Copy it:
+No robot is needed. Use two terminals on one machine, or one terminal on each
+of two machines.
 
 ```bash
 cd quickstart
-cp .env.example .env
+cp .env.example .env          # then paste your token and room id into .env
+
+python follower.py            # terminal 1: the robot side
+python leader.py              # terminal 2: the operator side
 ```
 
-Then open `.env` and fill it in.
+The leader prints `armed. ctrl-c to stop.`, then a `tick` line every second
+showing the follower's joints. `shoulder_pan` should swing back and forth.
+Press Ctrl-C on the leader: the follower reports `state: holding` and stays
+where it is.
 
-The scripts load `.env` from their own directory, so there is nothing to
-`source` and it does not matter where you run them from. Anything already
-set in your shell wins over the file. `.env` is gitignored — a room token is
-a bearer credential.
+[`quickstart/README.md`](quickstart/README.md) explains what each line means
+and suggests what to try next.
 
-The two every example needs are `ZERORUNTIME_AUTH_TOKEN` and `ZERORUNTIME_MEETING_ID` (in
-`ros2/`, the SDK's own `ZERORUNTIME_AUTH_TOKEN` and
-`ZERORUNTIME_MEETING_ID`, since the ROS node reads them itself), and both
-ends of a session must use the same room id.
+## Configuration
 
-Other settings live at the top of each script — open the file and edit
-them.
+Each example reads a `.env` file from its own directory (`cp .env.example .env`).
+All of them need `ZERORUNTIME_AUTH_TOKEN` and `ZERORUNTIME_MEETING_ID`. The
+hardware examples also need each arm's serial port and calibration id. Shell
+variables take precedence over `.env`, and `.env` is gitignored.
 
-## Safety, in one place
+Other settings are constants in the `── Settings ──` block at the top of each
+script. Each example's README lists every variable and setting it uses.
 
-Each example says this where it matters, but it is the same three facts
-every time.
+## Safety
 
-- **`slew` is a speed limit in disguise.** It caps how far one joint moves
-  in a single tick, so at 30 Hz a slew of 12 is 360 units/s. It is the first
-  number to re-derive on your own hardware, and `ZERORUNTIME_SLEW=2.0` is the
-  setting for a first run with a policy you have not watched before.
-  In `ros2/` it is `max_norm_step` in `bridge.yaml`, a fraction of each
-  joint's range per tick.
-- **Ctrl-c is a real stop.** It releases the deadman, the command stream
-  ends, the follower's watchdog runs out and the arm holds where it is. It
-  does not fall, and it does not depend on the thing that was driving it
-  agreeing to stop. In `ros2/` this holds for the leader, but Ctrl-c on the
-  follower's `ros2 launch` also stops the servo driver: torque goes off and
-  only the gears hold the arm, so a loaded pose can sag. `follower_leave`
-  leaves the room with the arm actively holding.
-- **Arm against a gate.** `ALIGN`, at the top of each leader script,
-  refuses to arm until the robot is near the leader's pose. Without it,
-  anything standing somewhere else makes the arm travel to meet it the
-  instant you arm. In `ros2/` the gate is `max_misalignment` in
-  `bridge.yaml`, shipped at 0.0 (off): `take_control` makes the follower
-  travel to the leader at the `max_norm_step` limit.
+- **Slew is the speed limit**: the maximum move per joint per tick (12 at 30 Hz = 360 units/s). Use `2.0` for a first run with an untested policy.
+- **Stopping the leader is always safe.** Ctrl-C releases the deadman, and the follower holds its pose.
+- **Stopping the follower in `ros2/` cuts torque**, so a loaded arm can sag. Use `follower_leave` instead. In `so101/` and `inference/`, the motors stay powered.
+- **The alignment gate ships off**, so the follower jumps to the leader's pose the moment you arm. Line the arms up first, or set `ALIGN` (e.g. `20.0` on an SO-101).
+
+## Build your own
+
+The examples are meant to be copied:
+
+| You want to | Start from |
+|---|---|
+| Connect your own robot: subclass `Follower` ([guide](https://docs.zeroruntime.ai/robotics/integrations/custom)) | [`quickstart/follower.py`](quickstart/follower.py) |
+| Drive from your own input device: subclass `Leader` | [`quickstart/leader.py`](quickstart/leader.py) |
+| Drive from a model: replace `load_policy()` | [`inference/smolvla_leader.py`](inference/smolvla_leader.py) |
+| Drive an SO-101 through LeRobot or ROS 2 | [`so101/`](so101/), [`ros2/`](ros2/) |
+
+Rules that apply to anything you build:
+
+1. Both ends declare the same joints and units, or `claim_control()` returns `False`.
+2. In a `Follower` or `Leader` subclass, call `super().__init__()` last.
+3. Never block in `read_joints()` / `write_joints()`. Put slow work on its own thread.
+4. Let hardware failures raise. The follower then stops the arm.
+
+API reference: [Follower](https://docs.zeroruntime.ai/robotics/api-reference/python/follower) ·
+[Leader](https://docs.zeroruntime.ai/robotics/api-reference/python/leader) ·
+[SafetyConfig](https://docs.zeroruntime.ai/robotics/api-reference/python/safety-config)
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `no control` / `no lease` | Start the follower first, with the same `ZERORUNTIME_MEETING_ID` on both ends. Pair scripts from the same example |
+| Join fails with 404 or `RoomError` | Create the room with [`create_room()`](#1-get-a-token-and-a-room-id) |
+| Follower shows `holding (starvation)` | The leader stopped sending. Check it is running and the network is up |
+
+Each example's README covers its own problems. Still stuck? See the
+[troubleshooting guide](https://docs.zeroruntime.ai/robotics/guides/troubleshooting),
+ask on [Discord](https://discord.gg/f2WsNDN9S5), or
+[open an issue](https://github.com/ZeroRuntimeAI/zrt-teleops-examples/issues).

@@ -1,109 +1,89 @@
 # inference
 
-A SmolVLA policy drives the arm instead of a person. The model runs here;
-the robot is somewhere else.
+A SmolVLA policy drives an SO-101 arm instead of a person. The model runs on
+one machine, and the arm can be anywhere else.
 
 ```
-policy host                              robot host
-───────────                              ──────────
-checkpoint on disk                       SO101Follower
-      │                                        │
-      ▼                                        ▼
-  PolicyLeader   ─── actions ──────────▶  safety gates ─▶ joints
-                 ◀── video + joints ───   observations
+policy machine                               robot machine
+──────────────                               ─────────────
+smolvla_leader.py  ── joint targets ──────▶  follower.py ─▶ SO-101
+                   ◀── video + joints ─────  cameras
 ```
 
-**Nothing on the follower knows a policy is driving.** It is the same
-follower a human operator talks to, and applies the same clamps, watchdog
-and deadman either way — `so101/follower.py` would work here unchanged.
-
-Two scripts, one per machine, and this directory is self-contained — copy
-it and it works.
-
-| | runs on | needs |
-|---|---|---|
-| `follower.py` | the robot | an SO-101, calibrated, plus its cameras |
-| `smolvla_leader.py` | wherever the model runs | a SmolVLA checkpoint on disk |
+The robot side is the same follower a human uses, with the same safety
+limits. It does not know a model is driving.
 
 ## Needs
 
-- `pip install "zeroruntime-teleops[lerobot]" "lerobot[smolvla]"`
-- A room id and a token, the same on both hosts
+- One calibrated SO-101 with its cameras. Get it working with a person
+  driving first, in [`so101/`](../so101/).
+- Python 3.12+ and `pip install "zeroruntime-teleops[lerobot]" "lerobot[smolvla]"`.
+- A GPU on the policy machine is recommended. CPU works, but slower.
+- A token and a room id: [root README, step 1](../README.md#1-get-a-token-and-a-room-id).
 
-```bash
-cp .env.example .env
-```
+## Setup
 
-Then open `.env` and fill it in.
+**1. Fill in `.env`** on each machine (`cp .env.example .env`):
 
-One copy per host: the session lines match, the hardware lines do not.
+| Variable | Machine | Value |
+|---|---|---|
+| `ZERORUNTIME_AUTH_TOKEN`, `ZERORUNTIME_MEETING_ID` | both | Your token and room id, the same on both |
+| `ZERORUNTIME_FOLLOWER_PORT`, `ZERORUNTIME_FOLLOWER_ID` | robot | The arm's serial port and calibration id |
+| `ZERORUNTIME_POLICY_PATH` | policy | The checkpoint directory (it contains `config.json`) |
+| `ZERORUNTIME_TASK` | policy | The task the checkpoint was trained on, word for word |
 
-`ZERORUNTIME_TASK` is required: SmolVLA is language conditioned, and the string has
-to match what the checkpoint was trained on.
-
-## Getting a checkpoint
-
-SmolVLA is ~0.9 GB, small enough for a Jetson. Any SO-101 fine-tune is the
-right shape — 6 actions:
+**2. Get a checkpoint.** Any SO-101 SmolVLA fine-tune works. To try a
+community one:
 
 ```bash
 hf download un1c0rnio/smolvla_so101_box_pencil4_100000 --local-dir ./ckpt
 python -m lerobot.processor.migrate_policy_normalization --pretrained-path ./ckpt
-# then ZERORUNTIME_POLICY_PATH=./ckpt_migrated
+# then set ZERORUNTIME_POLICY_PATH=./ckpt_migrated
 ```
 
-The middle step is needed for most community checkpoints (the script says
-so if you skip it) and writes a **new** `_migrated` directory — point at
-that one.
+A borrowed checkpoint won't do your task, but it proves the whole loop works.
 
-Set `CAMERA_LABELS` at the top of `follower.py` to the names the checkpoint
-was trained with — SmolVLA checkpoints usually want `camera1`, `camera2`.
-Get them wrong and the policy finds no image and the arm just holds; get
-their *order* wrong and it sees a wrist view where it expects the scene.
-
-A checkpoint you did not train will not do your task. It proves the loop:
-real weights, real latency.
+**3. Match the camera names.** Set `CAMERA_LABELS` at the top of
+`follower.py` to the names the checkpoint expects, in the right order. The
+leader prints them when it loads, for example `cameras ['camera1', 'camera2']`.
 
 ## Run
 
-On the robot:
+Set `SLEW = 2.0` at the top of `follower.py` for a first run, so the arm moves
+slowly. Then:
 
 ```bash
-python follower.py
+python follower.py          # on the robot machine, first
+python smolvla_leader.py    # on the policy machine
 ```
 
-On the machine running the model:
+The leader prints `armed, the policy is driving.` Press Ctrl-C to stop it. The
+arm holds where it is.
 
-```bash
-python smolvla_leader.py
-```
+**Arming.** By default (`ALIGN = None` in `smolvla_leader.py`), the arm moves
+to the policy's first output as soon as it arms. Set `ALIGN` to a number to
+wait until the arm is that close instead. With a borrowed checkpoint the
+policy's pose may be too far away to ever line up. In that case, move the arm
+closer by hand, or leave `ALIGN = None` and keep `SLEW` low.
 
-Settings are a block at the top of each script rather than command-line
-flags — `ALIGN` and `SYNC_BUFFER_MS` on the leader, `SLEW`, the camera
-format and `RECORD` on the follower. `RECORD = True` records each run to the
-cloud (billed); if the cloud is not up within 90 s, it records under
-`./sessions` instead. A local copy is kept there either way.
+To record runs, set `RECORD = True` in `follower.py`. Recordings go to the
+cloud (billed), and a local copy is saved under `./sessions`.
 
-Ctrl-c releases the deadman: the command stream stops, the follower's
-watchdog runs out and the arm holds. The model cannot refuse that stop.
+## Use your own model
 
-## Arming
+Copy [`smolvla_leader.py`](smolvla_leader.py) and replace `load_policy()`. It
+must return `predict(images, state) -> {joint: value}`. Inference already runs
+on its own thread, so a slow model just updates the arm less often.
 
-`ALIGN` refuses to arm until every joint is within that of the policy's
-first output — without it, a model whose output is far from the arm's
-position makes it travel there at full slew the instant you arm.
+## Troubleshooting
 
-Inference starts **before** the gate, deliberately: a policy's pose is its
-output, and that does not exist until the model has run once.
+| Problem | Fix |
+|---|---|
+| `no config.json in ...` | Point `ZERORUNTIME_POLICY_PATH` at the folder containing `config.json` |
+| `... is a pre-0.6 checkpoint` | Run the `migrate_policy_normalization` command it prints, then use the `_migrated` folder |
+| `checkpoint outputs N actions but this robot has 6 joints` | Use an SO-101 checkpoint |
+| Armed, but the arm doesn't follow the policy | The camera names don't match. Fix `CAMERA_LABELS` |
+| `never armed: gave up after 60s` | See **Arming** above |
+| `no control: no follower answered` | Start `follower.py` first, with the same room id |
 
-With a borrowed checkpoint the gate often never opens, because its output
-really is that far away:
-
-```
-  off by   +87.2 on shoulder_pan
-never armed: gave up after 60s waiting for the arms to align
-```
-
-That is it working. Move the arm nearer, or set `ALIGN = None` and travel
-there slowly — drop `SLEW` to `2.0` in `follower.py` first, which is
-60 units/s instead of 360.
+For port, calibration and power problems, see [`so101/`](../so101/README.md#troubleshooting).
