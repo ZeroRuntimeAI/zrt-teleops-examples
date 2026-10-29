@@ -7,6 +7,7 @@ room in between carries the video one way and the actions the other.
 |---|---|---|
 | [`quickstart/`](quickstart/) | a room id and a token | both ends of a real session, with no arm on either end |
 | [`so101/`](so101/) | two SO-101 arms, lerobot, two hosts | driving a real arm from a real arm, over the internet |
+| [`recording/`](recording/) | two SO-101 arms, lerobot, two hosts | recording a training dataset, one keypress per episode |
 | [`inference/`](inference/) | one SO-101, plus a SmolVLA checkpoint | a policy driving the arm instead of a person |
 | [`ros2/`](ros2/) | two SO-101 arms, ROS 2 Jazzy on Ubuntu 24.04 | the `so101/` session with ros2_control on each arm |
 

@@ -23,11 +23,11 @@ it and it works.
 | | runs on | needs |
 |---|---|---|
 | `follower.py` | the robot | an SO-101, calibrated, plus its cameras |
-| `smolvla_leader.py` | wherever the model runs | a SmolVLA checkpoint on disk |
+| `smolvla_leader.py` | wherever the model runs | a SmolVLA checkpoint, on disk or on the Hugging Face Hub |
 
 ## Needs
 
-- `pip install "zeroruntime-teleops[lerobot]" "lerobot[smolvla]"`
+-    pip install "zeroruntime-teleops[lerobot]" "lerobot[smolvla]==0.6.1" python-dotenv opencv-python-headless
 - A room id and a token, the same on both hosts
 
 ```bash
@@ -43,26 +43,38 @@ to match what the checkpoint was trained on.
 
 ## Getting a checkpoint
 
-SmolVLA is ~0.9 GB, small enough for a Jetson. Any SO-101 fine-tune is the
-right shape — 6 actions:
+Use [`zero-runtime/smolvla_so101_pick_place_bowl`](https://huggingface.co/zero-runtime/smolvla_so101_pick_place_bowl):
+SmolVLA fine-tuned on an SO-101 picking up an orange cube and placing it in
+a white bowl.
 
-```bash
-hf download un1c0rnio/smolvla_so101_box_pencil4_100000 --local-dir ./ckpt
-python -m lerobot.processor.migrate_policy_normalization --pretrained-path ./ckpt
-# then ZERORUNTIME_POLICY_PATH=./ckpt_migrated
+`smolvla_leader.py` takes the repo id directly and downloads it; there is
+nothing to convert:
+
+```
+ZERORUNTIME_POLICY_PATH=zero-runtime/smolvla_so101_pick_place_bowl
+ZERORUNTIME_TASK=pick up the orange cube and place it in the white bowl
 ```
 
-The middle step is needed for most community checkpoints (the script says
-so if you skip it) and writes a **new** `_migrated` directory — point at
-that one.
+The task must be that sentence, word for word: it is the one task the
+checkpoint was trained on. The rate (10 Hz) and joint order are read from
+its training dataset, `zeroruntime/so101_pick_place_bowl`.
 
-Set `CAMERA_LABELS` at the top of `follower.py` to the names the checkpoint
-was trained with — SmolVLA checkpoints usually want `camera1`, `camera2`.
-Get them wrong and the policy finds no image and the arm just holds; get
-their *order* wrong and it sees a wrist view where it expects the scene.
+It was trained on three cameras. Set `CAMERA_LABELS` at the top of
+`follower.py` to the names they had when it was recorded:
 
-A checkpoint you did not train will not do your task. It proves the loop:
-real weights, real latency.
+```python
+CAMERA_LABELS = ["top", "wrist", "side"]
+```
+
+The leader maps them to the checkpoint's `camera1`, `camera2`, `camera3`
+by itself. Cameras are labelled in the order they are found, so check the
+camera lines the follower prints at startup: if `top` is really the wrist
+camera, the policy sees the wrong scene. If a camera is missing, the arm
+just holds.
+
+It does this task, on a setup like the one it was recorded on: same
+cameras, similar placement, an orange cube and a white bowl. A different
+scene or task needs your own fine-tune.
 
 ## Run
 
@@ -86,24 +98,3 @@ cloud (billed); if the cloud is not up within 90 s, it records under
 
 Ctrl-c releases the deadman: the command stream stops, the follower's
 watchdog runs out and the arm holds. The model cannot refuse that stop.
-
-## Arming
-
-`ALIGN` refuses to arm until every joint is within that of the policy's
-first output — without it, a model whose output is far from the arm's
-position makes it travel there at full slew the instant you arm.
-
-Inference starts **before** the gate, deliberately: a policy's pose is its
-output, and that does not exist until the model has run once.
-
-With a borrowed checkpoint the gate often never opens, because its output
-really is that far away:
-
-```
-  off by   +87.2 on shoulder_pan
-never armed: gave up after 60s waiting for the arms to align
-```
-
-That is it working. Move the arm nearer, or set `ALIGN = None` and travel
-there slowly — drop `SLEW` to `2.0` in `follower.py` first, which is
-60 units/s instead of 360.
