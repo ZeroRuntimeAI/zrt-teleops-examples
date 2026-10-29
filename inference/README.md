@@ -53,11 +53,15 @@ nothing to convert:
 ```
 ZERORUNTIME_POLICY_PATH=zero-runtime/smolvla_so101_pick_place_bowl
 ZERORUNTIME_TASK=pick up the orange cube and place it in the white bowl
+ZERORUNTIME_DATASET_ROOT=zero-runtime/so101_pick_place_bowl
 ```
 
 The task must be that sentence, word for word: it is the one task the
 checkpoint was trained on. The rate (10 Hz) and joint order are read from
-its training dataset, `zeroruntime/so101_pick_place_bowl`.
+its training dataset,
+[`zero-runtime/so101_pick_place_bowl`](https://huggingface.co/datasets/zero-runtime/so101_pick_place_bowl).
+Leave that line out and the leader falls back to the dataset named inside the
+checkpoint, and to 30 Hz if it cannot find one; the startup lines say which.
 
 It was trained on three cameras. Set `CAMERA_LABELS` at the top of
 `follower.py` to the names they had when it was recorded:

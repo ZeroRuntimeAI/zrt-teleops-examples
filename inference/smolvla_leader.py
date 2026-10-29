@@ -1,72 +1,25 @@
 #!/usr/bin/env python3
 """
-Drive an SO-101 with a SmolVLA checkpoint, from any machine: a rented cloud
-GPU, a Colab/Kaggle notebook, a Jetson next to the arm, a Mac, or plain CPU.
-Bring your own checkpoint (local or on the Hugging Face Hub) and a room;
-everything else is read from the checkpoint and its training dataset.
+SmolVLA leader -- run this on any machine with a GPU: a cloud box, a
+notebook, a Jetson next to the arm, or a Mac.
 
-    python smolvla_leader.py --policy ./pretrained_model --task "pick up the cube" --check
+    python smolvla_leader.py --policy user/my_smolvla --task "pick up the cube" --check
     python smolvla_leader.py --policy user/my_smolvla --task "pick up the cube"
-    python smolvla_leader.py --policy user/my_run/checkpoints/last/pretrained_model --task "..."
 
-Always run --check first on a new machine: it loads the checkpoint, times
-inference on this hardware and tells you whether it is fast enough, and
-which --num-steps to use if not. No robot or room is needed for it.
+Run --check first on a new machine. It loads the checkpoint without the robot,
+times inference and tells you if this machine is fast enough. On a Jetson or
+a laptop, add --num-steps 5.
 
-Start `follower.py` on the robot first. Nothing over there changes: the
-follower cannot tell a model from a human and applies the same clamps,
-watchdog and deadman to both.
+Start follower.py on the robot first. When the leader takes control, the arm
+moves smoothly to the pose the training episodes started from, then the
+policy takes over. Inference runs while the arm moves, so a slow GPU never
+makes the arm stop and wait.
 
-HARDWARE (device is picked automatically: cuda > mps > cpu; --device overrides)
+Camera names, joint order and the control rate are read from the checkpoint
+and its dataset, and printed at startup. Check those lines before arming.
 
-    Cloud GPU (T4, L4, A10, A100, H100), Linux, Windows
-        pip install "lerobot[smolvla]" "zeroruntime-teleops[lerobot]"
-    Colab / Kaggle -- lerobot needs Python >= 3.12; if the notebook's is older:
-        pip install uv && uv venv /tmp/env --python 3.12
-        uv pip install --python /tmp/env/bin/python "lerobot[smolvla]" "zeroruntime-teleops[lerobot]"
-        then run this file with /tmp/env/bin/python; set settings via os.environ
-    Mac (Apple silicon) -- runs on the GPU via MPS; macOS 14+ recommended
-        pip install "lerobot[smolvla]" "zeroruntime-teleops[lerobot]"
-    Jetson Orin (JetPack 7) -- needs a torch build that runs on sm_87. torch
-        2.12.1+cu132 does (it warns, the warning is filtered here); pin it:
-        pip install "torch==2.12.1+cu132" "torchvision==0.27.1+cu132" \
-            --index-url https://download.pytorch.org/whl/cu132
-        then install lerobot without letting it replace torch (uv --override).
-        Expect ~1.7 s per chunk at 10 denoising steps; use --num-steps 5.
-    CPU only -- loads and runs, but ~1 min per chunk: --check only.
-
-Why async: inference runs WHILE the arm executes the previous chunk, and the
-actions that went stale during inference are skipped. A slow machine plans
-less often, but the arm never stops and waits -- a sync loop with a 1-2 s
-inference freezes the arm right above the object. Timing adapts to the
-machine: the next inference starts half a chunk early, or earlier if
-inference is slower than that.
-
-SETTINGS: flag > environment > `.env` next to this file > default. In a
-notebook, set os.environ[...] and run the script with no flags.
-
-    --policy      ZERORUNTIME_POLICY_PATH   checkpoint dir, Hub repo, or repo/subfolder
-    --task        ZERORUNTIME_TASK          the training task, word for word
-    --token       ZERORUNTIME_AUTH_TOKEN
-    --meeting-id  ZERORUNTIME_MEETING_ID
-    --num-steps   ZERORUNTIME_NUM_STEPS     denoising steps (default 10); 5 is ~2x faster
-
-Read from the checkpoint / dataset, each overridable, each printed with its
-source at startup -- check those lines before arming:
-
-    cameras       train_config.json rename_map, else the checkpoint's own names
-                  (= the labels follower.py must publish)          --camera-map
-    joint order   dataset meta/info.json, else LeRobot SO-101      --joint-order
-    policy rate   dataset fps, else 30                             --policy-hz
-
-The dataset is found via --dataset, or the repo/root recorded in the
-checkpoint's train_config.json. Private Hub repos need HF_TOKEN.
-
-Assumes one SO-101 follower and a dataset in NORMALIZED units (lerobot's
-range_m100_100 joints, 0-100 gripper) -- the units the follower streams. The
-dataset's per-joint range is printed at startup, with a warning if it looks
-like degrees (beyond +-150); stats cannot prove the units, so record with
-use_degrees=False.
+Needs ZERORUNTIME_AUTH_TOKEN and ZERORUNTIME_MEETING_ID -- see .env.example.
+Every setting is also a flag; run with --help for the full list.
 """
 
 import argparse
@@ -84,25 +37,24 @@ from dotenv import load_dotenv
 
 HERE = Path(__file__).resolve().parent
 
-# Before torch is imported: on Apple silicon, run ops MPS lacks on the CPU.
+# Must be set before torch is imported.
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-# torch builds that predate a GPU (e.g. Jetson Orin, sm_87, on JetPack 7) warn
-# at import even though the kernels run. Verify with --check, not the warning.
+# Jetson Orin builds of torch warn about sm_87 even though they work.
 warnings.filterwarnings("ignore", message=".*compute capability.*")
 
-#: Wire order: sorted and normalized, matching the lerobot SO-101 adapter.
-#: Change it and the follower refuses the session.
+#: Joint order on the wire. The follower expects exactly this.
 JOINTS = ("elbow_flex", "gripper", "shoulder_lift", "shoulder_pan",
           "wrist_flex", "wrist_roll")
 
-#: LeRobot's SO-101 order -- what `lerobot-record` writes into a dataset.
+#: Joint order in datasets recorded with lerobot.
 LEROBOT_ORDER = ("shoulder_pan", "shoulder_lift", "elbow_flex",
                  "wrist_flex", "wrist_roll", "gripper")
 
-#: Speed limit the leader applies before sending, in units/s. Keeps a bad
-#: prediction from slamming the arm into the table. 1.2x the p99 joint speed
-#: of the training demos is a good value; these defaults suit a calm SO-101.
+#: Slower than this per chunk and the arm tends to miss grasps.
+FRESH_S = 0.75
+
+#: Speed limit per joint, in units per second.
 DEFAULT_MAX_SPEED = {"shoulder_pan": 80.0, "shoulder_lift": 80.0,
                      "elbow_flex": 80.0, "wrist_flex": 100.0,
                      "wrist_roll": 100.0, "gripper": 150.0}
@@ -116,18 +68,24 @@ class Settings:
     task: str = ""
     token: str = ""
     meeting_id: str = ""
-    fps: int = 30                       # control/publish rate to the follower
-    policy_hz: float | None = None      # dataset fps; None = from the dataset
-    dataset: str | None = None          # local dataset dir or Hub dataset id
-    camera_map: dict = field(default_factory=dict)   # slot -> follower label
-    joint_order: tuple | None = None    # model order, wire names
+    fps: int = 30
+    policy_hz: float | None = None
+    dataset: str | None = None
+    camera_map: dict = field(default_factory=dict)
+    joint_order: tuple | None = None
     device: str | None = None
-    num_steps: int | None = None        # flow-matching steps (VLAs); fewer = faster
-    prefetch_s: float | None = None     # None = auto: half a chunk, >= inference + 0.5 s
-    blend_steps: int = 10               # crossfade old chunk -> new chunk
+    num_steps: int | None = None
+    prefetch_s: float | None = None
+    blend_steps: int = 10
     max_speed: dict = field(default_factory=lambda: dict(DEFAULT_MAX_SPEED))
     sync_buffer_ms: float = 120.0
     first_chunk_timeout_s: float = 120.0
+    fp32: bool = False
+    home: str = "dataset"
+    home_speed: float = 30.0
+    home_min_s: float = 1.5
+    home_settle_s: float = 0.5
+    ramp_s: float = 1.5
     check: bool = False
     verbose: bool = False
 
@@ -163,6 +121,13 @@ def parse_args() -> Settings:
     p.add_argument("--max-speed", help="units/s per joint, e.g. gripper=150,"
                                        "shoulder_lift=80 (merged into the defaults)")
     p.add_argument("--sync-buffer-ms", type=float, help="[120]")
+    p.add_argument("--fp32", action="store_true", help="run the whole model in float32; "
+                   "compare speed with --check (Apple GPUs without fast bf16) [ZERORUNTIME_FP32]")
+    p.add_argument("--home", help="start pose before the policy: 'dataset' (median first "
+                   "frame of the training episodes), 'current' (no move), or 6 values in "
+                   "SO-101 order / name=value pairs [ZERORUNTIME_HOME, dataset]")
+    p.add_argument("--home-speed", type=float, help="homing speed, units/s [30]")
+    p.add_argument("--ramp-s", type=float, help="seconds to fade into the first chunk [1.5]")
     p.add_argument("--check", action="store_true", help="load and infer only, no robot")
     p.add_argument("-v", "--verbose", action="store_true", help="per-chunk timing")
     a = p.parse_args()
@@ -200,12 +165,19 @@ def parse_args() -> Settings:
             s.max_speed[k.strip()] = float(v)
     if a.sync_buffer_ms is not None:
         s.sync_buffer_ms = a.sync_buffer_ms
+    s.fp32 = a.fp32 or _env("ZERORUNTIME_FP32", "0").lower() in ("1", "true", "yes")
+    s.home = a.home or _env("ZERORUNTIME_HOME", "dataset")
+    if a.home_speed:
+        s.home_speed = a.home_speed
+    if a.ramp_s is not None:
+        s.ramp_s = a.ramp_s
     s.check, s.verbose = a.check, a.verbose
 
     def need(value, flag, env, what):
         if not value:
-            raise SystemExit(f"set {flag} or {env} -- {what}\n"
-                             f"  (flag, environment, or {HERE / '.env'})")
+            hint = ("  fill it in: inference/.env" if (HERE / ".env").exists()
+                    else "  cp inference/.env.example inference/.env")
+            raise SystemExit(f"set {env} (or {flag}) -- {what}\n{hint}")
     need(s.policy, "--policy", "ZERORUNTIME_POLICY_PATH",
          "the checkpoint dir (with config.json) or a Hub repo id")
     need(s.task, "--task", "ZERORUNTIME_TASK",
@@ -220,9 +192,7 @@ def parse_args() -> Settings:
 # ── Checkpoint ─────────────────────────────────────────────────────────────
 
 def resolve_checkpoint(spec: str) -> Path:
-    """A local dir, a Hub repo id, or `user/repo/sub/folder`. Within a dir or
-    repo the policy is found automatically (shallowest config.json, so a
-    training repo resolves to checkpoints/last/pretrained_model)."""
+    """Find the policy in a local folder or a Hub repo."""
     local = Path(spec).expanduser()
     if local.exists():
         for cand in (local, local / "pretrained_model",
@@ -238,15 +208,16 @@ def resolve_checkpoint(spec: str) -> Path:
     try:
         files = list_repo_files(repo)
     except Exception as exc:
-        raise SystemExit(f"{spec} is neither a local folder nor a readable Hub repo\n"
-                         f"  ({exc.__class__.__name__}). Private repo: set HF_TOKEN."
-                         ) from None
+        raise SystemExit(f"{spec}: not a local folder, and the Hub refused it "
+                         f"({exc.__class__.__name__}).\n  If the repo is gated or private, "
+                         f"accept its conditions on huggingface.co,\n  then run "
+                         f"`hf auth login` or set HF_TOKEN.") from None
     def is_policy(f):
         parent = str(Path(f).parent)
         weights = "model.safetensors" if parent == "." else f"{parent}/model.safetensors"
         return Path(f).name == "config.json" and f.startswith(prefix) and weights in files
 
-    # Shallowest first, and `last` before numbered checkpoints at equal depth.
+    # Prefer the top-level policy, then checkpoints/last.
     configs = sorted(filter(is_policy, files),
                      key=lambda f: (f.count("/"), "/last/" not in f"/{f}", f))
     if not configs:
@@ -265,14 +236,25 @@ def _is_policy_dir(p: Path) -> bool:
         return False
 
 
+_refused = set()
+
+
+def _hub_refused(repo: str, exc: Exception) -> None:
+    """Say once why a dataset on the Hub could not be read."""
+    if repo not in _refused:
+        _refused.add(repo)
+        print(f"  dataset {repo}: the Hub refused access ({exc.__class__.__name__}). "
+              f"If it is gated, accept its\n  conditions on huggingface.co and set "
+              f"HF_TOKEN; until then fps, joint order and start pose use defaults.")
+
+
 def read_train_config(ckpt: Path) -> dict:
     f = ckpt / "train_config.json"
     return json.loads(f.read_text()) if f.exists() else {}
 
 
 def dataset_file(s: Settings, train_cfg: dict, rel: str) -> dict | None:
-    """A JSON file (e.g. meta/info.json) of the training dataset: from
-    --dataset, the root the training run used, or its Hub repo."""
+    """Read a JSON file from the training dataset, local or on the Hub."""
     ds = train_cfg.get("dataset") or {}
     cands = [c for c in (s.dataset, ds.get("root"), ds.get("repo_id")) if c]
     for c in cands:
@@ -284,14 +266,73 @@ def dataset_file(s: Settings, train_cfg: dict, rel: str) -> dict | None:
         try:
             from huggingface_hub import hf_hub_download
             return json.loads(Path(hf_hub_download(c, rel, repo_type="dataset")).read_text())
-        except Exception:
+        except Exception as exc:
+            _hub_refused(c, exc)
             continue
     return None
 
 
+def dataset_start_pose(s: Settings, train_cfg: dict, order) -> tuple[dict, str] | None:
+    """The median pose the training episodes started from."""
+    import glob
+    ds = train_cfg.get("dataset") or {}
+    files = []
+    for c in (s.dataset, ds.get("root"), ds.get("repo_id")):
+        if not c:
+            continue
+        p = Path(c).expanduser()
+        if p.exists():
+            files = sorted(glob.glob(str(p / "data" / "**" / "*.parquet"), recursive=True))
+        elif not str(c).startswith("local/") and str(c).count("/") == 1:
+            try:
+                from huggingface_hub import hf_hub_download, list_repo_files
+                names = sorted(f for f in list_repo_files(c, repo_type="dataset")
+                               if f.startswith("data/") and f.endswith(".parquet"))
+                files = [hf_hub_download(c, f, repo_type="dataset") for f in names[:4]]
+            except Exception as exc:
+                _hub_refused(c, exc)
+                files = []
+        if files:
+            break
+    if not files:
+        return None
+    try:
+        import pandas as pd
+        starts = []
+        for f in files[:4]:
+            df = pd.read_parquet(f, columns=["frame_index", "observation.state"])
+            starts += [np.asarray(v, dtype=float) for v in
+                       df.loc[df["frame_index"] == 0, "observation.state"]]
+    except Exception as exc:
+        print(f"  home: could not read the dataset's episodes ({exc.__class__.__name__})")
+        return None
+    if not starts:
+        return None
+    st = np.stack(starts)
+    med, spread = np.median(st, axis=0), np.percentile(np.abs(st - np.median(st, 0)), 90, 0)
+    pose = {j: float(med[i]) for i, j in enumerate(order)}
+    return pose, (f"dataset: median start of {len(starts)} episodes, "
+                  f"90% within +-{spread.max():.0f}")
+
+
+def parse_home(spec: str) -> dict | None:
+    """'name=value,...' or 6 comma values in SO-101 order."""
+    try:
+        if "=" in spec:
+            pose = {k.strip().removesuffix(".pos"): float(v)
+                    for k, v in (x.split("=", 1) for x in spec.split(","))}
+        else:
+            pose = dict(zip(LEROBOT_ORDER, (float(x) for x in spec.split(","))))
+    except ValueError:
+        raise SystemExit(f"--home {spec!r}: use 'dataset', 'current', 6 numbers in "
+                         f"SO-101 order, or name=value pairs") from None
+    if set(pose) != set(JOINTS):
+        raise SystemExit(f"--home needs all 6 joints {list(LEROBOT_ORDER)}, got {list(pose)}")
+    return pose
+
+
 def load_config(ckpt: Path):
-    """The policy config. Tolerates fields a different lerobot version wrote,
-    so the version mismatch surfaces as one line, not a draccus traceback."""
+    """Read config.json, ignoring fields this lerobot does not know."""
     from lerobot.configs.policies import PreTrainedConfig
     try:
         return PreTrainedConfig.from_pretrained(str(ckpt))
@@ -314,8 +355,7 @@ def load_config(ckpt: Path):
 
 
 def pick_device(s: Settings):
-    """cuda > mps > cpu, plus per-backend speed settings and one line saying
-    what was found -- the first thing to check on a new machine."""
+    """Pick cuda, mps or cpu and print what was found."""
     import torch
     dev = s.device or ("cuda" if torch.cuda.is_available()
                        else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -323,9 +363,9 @@ def pick_device(s: Settings):
         if not torch.cuda.is_available():
             raise SystemExit(f"--device {dev}, but this torch has no CUDA "
                              f"(torch {torch.__version__}). Install a CUDA build.")
-        torch.backends.cuda.matmul.allow_tf32 = True     # Ampere+: faster fp32 parts
+        torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True             # fixed input sizes
+        torch.backends.cudnn.benchmark = True
         i = torch.device(dev).index or 0
         prop = torch.cuda.get_device_properties(i)
         jetson = Path("/etc/nv_tegra_release").exists()
@@ -346,8 +386,7 @@ def pick_device(s: Settings):
 
 
 def load_policy(s: Settings):
-    """Return `predict_chunk(images, state) -> [ {joint: value}, ... ]` plus
-    what the leader needs to know (camera labels, rate)."""
+    """Load the checkpoint and return predict_chunk(images, state)."""
     import torch
     from lerobot.policies import get_policy_class, make_pre_post_processors
     from lerobot.policies.utils import prepare_observation_for_inference
@@ -366,13 +405,15 @@ def load_policy(s: Settings):
     if s.num_steps:
         cfg.num_steps = s.num_steps
 
-    # from_pretrained, not make_policy: make_policy needs a dataset or env.
+    # make_policy would need the dataset; from_pretrained does not.
     policy = get_policy_class(cfg.type).from_pretrained(str(ckpt), config=cfg)
     policy.to(device).eval()
+    if s.fp32:
+        import torch as _t
+        policy.to(_t.float32)
     policy.reset()
 
-    # from_pretrained loads non-strictly. Verify one trained tensor really
-    # landed, or a version mismatch drives the arm with random weights.
+    # Loading is not strict, so check that the trained weights really landed.
     from safetensors import safe_open
     params = dict(policy.named_parameters())
     with safe_open(ckpt / "model.safetensors", framework="pt") as f:
@@ -401,7 +442,6 @@ def load_policy(s: Settings):
                          f"--pretrained-path {ckpt}\n\n  then use the `_migrated` "
                          f"folder.") from None
 
-    # Joints: the checkpoint must drive exactly this robot's joints.
     width = cfg.output_features["action"].shape[0]
     if width != len(JOINTS):
         raise SystemExit(f"the checkpoint outputs {width} actions; this robot has "
@@ -424,10 +464,8 @@ def load_policy(s: Settings):
             raise SystemExit(f"joint names {list(order)} are not this robot's "
                              f"{list(JOINTS)}. Pass --joint-order.")
 
-    # Units: the follower streams NORMALIZED values (-100..100, gripper 0..100).
-    # Normalized values can exceed +-100 a little (a joint moved past its
-    # calibrated range), and a degrees dataset with small motions stays inside
-    # +-100 -- so stats cannot prove the units. Show the range, warn, carry on.
+    # The follower streams normalized units. Show the dataset's range so a
+    # dataset recorded in degrees is easy to spot.
     if stats and "action" in stats and "max" in stats["action"]:
         lo = np.array(stats["action"]["min"], dtype=float)
         hi = np.array(stats["action"]["max"], dtype=float)
@@ -440,7 +478,6 @@ def load_policy(s: Settings):
                   "units. If the dataset was recorded with\n           use_degrees=True, "
                   "the arm will be driven to wrong poses.")
 
-    # Rate: actions were recorded at the dataset fps; play them at that rate.
     if s.policy_hz:
         hz, hz_src = s.policy_hz, "--policy-hz"
     elif info and info.get("fps"):
@@ -448,9 +485,7 @@ def load_policy(s: Settings):
     else:
         hz, hz_src = 30.0, "LeRobot default -- no dataset found, pass --policy-hz"
 
-    # Cameras: checkpoint slot -> follower label. Training with --rename_map
-    # records the mapping; otherwise the checkpoint's names ARE the labels.
-    # Empty-camera slots (SmolVLA `empty_cameras`) are filled by the policy.
+    # Training with --rename_map records which camera fed which slot.
     slots = sorted(k.removeprefix("observation.images.") for k in cfg.image_features
                    if "empty_camera" not in k)
     cam_map, cam_src = {}, "checkpoint names"
@@ -469,23 +504,23 @@ def load_policy(s: Settings):
     print(f"  joints  {list(act_order)}   ({order_src})")
     print(f"  rate    {hz:g} Hz, chunk {cfg.chunk_size} = {cfg.chunk_size / hz:.1f}s   "
           f"({hz_src})")
+    print(f"  dtype   {'float32 (--fp32)' if s.fp32 else 'checkpoint default (bf16 + fp32)'}")
     print(f"  steps   {cfg.num_steps} denoising steps"
           + ("" if s.num_steps else "   (--num-steps 5 for ~2x speed on small GPUs)"))
     print(f"  task    {s.task!r}")
 
-    fp32 = [False]
+    fp32 = [s.fp32]
 
     def infer(batch):
         with torch.inference_mode():
             return post(policy.predict_action_chunk(pre(batch)))
 
     def predict_chunk(images, state):
-        # No resize: SmolVLA pads and resizes every camera internally.
         obs = {}
         for slot in slots:
             frame = images.get(cam_map[slot])
             if frame is None:
-                return []                     # a camera it needs is missing: hold
+                return []
             obs[f"observation.images.{slot}"] = frame
         obs["observation.state"] = np.array([state.get(j, 0.0) for j in st_order],
                                             dtype=np.float32)
@@ -494,8 +529,7 @@ def load_policy(s: Settings):
         try:
             acts = infer(batch)
         except (RuntimeError, TypeError) as exc:
-            # Older macOS / some CPUs lack a bf16 kernel SmolVLA uses. Retry
-            # once with the whole model in fp32 (2x memory, still ~2 GB).
+            # Some devices lack a bf16 kernel. Fall back to fp32 once.
             if fp32[0] or "bfloat16" not in str(exc).lower().replace("_", ""):
                 raise
             fp32[0] = True
@@ -506,6 +540,19 @@ def load_policy(s: Settings):
         acts = acts.reshape(-1, width).float().cpu().numpy()
         return [{j: float(v) for j, v in zip(act_order, row)} for row in acts]
 
+    mode = s.home.strip().lower()
+    if mode == "current":
+        home, home_src = None, "current pose (no move)"
+    elif mode == "dataset":
+        found = dataset_start_pose(s, train_cfg, st_order)
+        home, home_src = found if found else (None, "current pose -- no dataset episodes "
+                                                    "found, pass --dataset or --home")
+    else:
+        home, home_src = parse_home(s.home), "--home"
+    print("  home    " + ("  ".join(f"{j}={home[j]:+.1f}" for j in LEROBOT_ORDER)
+                          if home else "-") + f"   ({home_src})")
+
+    predict_chunk.home = home
     predict_chunk.labels = [cam_map[sl] for sl in slots]
     predict_chunk.num_steps = cfg.num_steps
     predict_chunk.hz = hz
@@ -519,14 +566,13 @@ def make_leader(s: Settings):
     from zeroruntime.teleops.protocol import Units
 
     class PolicyLeader(Leader):
-        """`read_joints()` runs inside the publish tick, so it must not block:
-        it returns whatever the inference loop last set."""
+        """A Leader whose joint targets come from the model."""
 
         def __init__(self, **kw) -> None:
             self.robot_id = "smolvla"
             self.action = {j: 0.0 for j in JOINTS}
             self._lock = threading.Lock()
-            super().__init__(**kw)                     # LAST
+            super().__init__(**kw)
 
         def descriptor(self):
             return single_group_descriptor(self.robot_id, "policy", JOINTS,
@@ -545,24 +591,20 @@ def make_leader(s: Settings):
 
 
 def _rgb(frame):
-    """Planar I420 from the wire -> (h, w, 3) uint8 RGB. No resize: the
-    policy pads and resizes internally."""
+    """I420 frame from the wire to RGB."""
     import cv2
     return cv2.cvtColor(frame.array, cv2.COLOR_YUV2RGB_I420)
 
 
 def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
-    """Play the current chunk at the policy rate while the next one is
-    computed on a side thread. When it lands: drop the actions that went
-    stale during inference, crossfade from the old chunk, and clamp every
-    step to the speed limit."""
+    """Play the current chunk while the next one is computed."""
     period = 1.0 / predict_chunk.hz
-    limit = {j: v * period for j, v in s.max_speed.items()}    # units per action
+    limit = {j: v * period for j, v in s.max_speed.items()}
     queue, lock = [], threading.Lock()
     busy = threading.Event()
-    lat = [None]                 # running inference time, seconds
-    chunk_len = [None]           # actions per chunk, from the first result
-    clipped, starved = [0], [0]  # per-chunk counters: clamped steps, empty-queue steps
+    lat = [None]
+    chunk_len = [None]
+    clipped, starved = [0], [0]
     warned = [0.0]
     seen, last_wait = None, 0.0
 
@@ -577,11 +619,19 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
             chunk_s = len(acts) * period
             new = acts[int(round(dt / period)):]
             with lock:
-                old = queue[:]                       # old[k], new[k]: same instant
+                old = queue[:]
                 n = min(s.blend_steps, len(old), len(new))
                 for k in range(n):
                     w = (k + 1) / (n + 1)
                     new[k] = {j: (1 - w) * old[k][j] + w * new[k][j] for j in new[k]}
+                if not ready.is_set():
+                    # Fade the first chunk in from the held pose.
+                    base = leader.read_joints()
+                    n = min(int(round(s.ramp_s / period)), len(new))
+                    for k in range(n):
+                        t = (k + 1) / (n + 1)
+                        w = t * t * (3 - 2 * t)
+                        new[k] = {j: (1 - w) * base[j] + w * v for j, v in new[k].items()}
                 if new:
                     queue[:] = new
             thr = prefetch_threshold(s, chunk_s, lat[0], period)
@@ -618,7 +668,7 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
             obs = leader.observation()
             try:
                 labels = set(obs.images)
-                if labels != seen:
+                if labels != seen and labels:
                     seen = labels
                     missing = [c for c in predict_chunk.labels if c not in labels]
                     print(f"  follower cameras {sorted(labels)}"
@@ -631,7 +681,7 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
                     images = None
             finally:
                 for f in obs.images.values():
-                    f.release()                      # or decoder buffers pin
+                    f.release()
             if images:
                 busy.set()
                 threading.Thread(target=run, args=(images, joints, time.monotonic()),
@@ -653,7 +703,7 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
             leader.set_action(safe)
             ready.set()
         elif ready.is_set():
-            starved[0] += 1              # driving, but nothing queued: the arm holds
+            starved[0] += 1
 
         due += period
         delay = due - time.monotonic()
@@ -664,12 +714,7 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
 
 
 def prefetch_threshold(s: Settings, chunk_s: float, latency: float, period: float) -> float:
-    """Seconds of queued actions at which the next inference starts.
-
-    Auto: half a chunk (LeRobot async's default), but never less than the
-    inference time + 0.5 s, so the next chunk lands before the queue runs dry.
-    A slow machine therefore starts earlier; a fast one keeps re-planning
-    every half chunk. Capped one action short of a full chunk."""
+    """Seconds of actions left when the next inference should start."""
     base = s.prefetch_s if s.prefetch_s is not None else chunk_s / 2
     return min(max(base, latency + 0.5), chunk_s - period)
 
@@ -677,8 +722,7 @@ def prefetch_threshold(s: Settings, chunk_s: float, latency: float, period: floa
 # ── Modes ──────────────────────────────────────────────────────────────────
 
 def check(predict_chunk, s: Settings) -> None:
-    """Grey frames, zero pose, no robot: does it load, run, how fast -- and
-    which settings suit this machine."""
+    """Time inference on grey frames, no robot needed."""
     grey = np.full((480, 640, 3), 128, dtype=np.uint8)
     images = {lbl: grey for lbl in predict_chunk.labels}
     state = {j: 0.0 for j in JOINTS}
@@ -692,7 +736,7 @@ def check(predict_chunk, s: Settings) -> None:
         print(f"  chunk {i}  {times[-1] * 1e3:7.0f} ms" + ("   (warm-up)" if i == 0 else "")
               + "   first: " + "  ".join(f"{j}={acts[0][j]:+.1f}" for j in JOINTS))
 
-    took = float(np.median(times[1:]))                 # chunk 0 includes warm-up
+    took = float(np.median(times[1:]))
     period = 1.0 / predict_chunk.hz
     chunk_s = len(acts) * period
     thr = prefetch_threshold(s, chunk_s, took, period)
@@ -708,12 +752,15 @@ def check(predict_chunk, s: Settings) -> None:
             print(f"            try --num-steps {max(3, steps // 2)}, or a faster GPU.")
         else:
             print("            use a faster GPU (or cuda/mps instead of cpu).")
-    elif took > 1.0:
-        print("  verdict   usable, but plans are stale by the time they run; "
-              "fine motions (grasps) may suffer.")
-        if steps and steps > 5:
-            print(f"            try --num-steps 5 (about {steps / 5:.0f}x fewer "
-                  f"denoising passes), then check grasp quality.")
+    elif took > FRESH_S:
+        print(f"  verdict   STALE: plans are {took:.1f}s old when they run. Above ~{FRESH_S}s "
+              f"the arm tends to\n            hover over the object instead of grasping.")
+        if steps and steps > 3:
+            print(f"            try --num-steps {max(3, steps // 2)}"
+                  + ("" if s.fp32 else ", and --fp32 (compare)") + ", then re-check.")
+        else:
+            print("            fewer steps won't help much: the vision encoder dominates."
+                  + ("" if s.fp32 else " Try --fp32;") + " else use a faster GPU.")
     else:
         print("  verdict   fast enough. No changes needed.")
     if s.prefetch_s is not None and s.prefetch_s < took + 0.5:
@@ -722,9 +769,7 @@ def check(predict_chunk, s: Settings) -> None:
 
 
 def warm_up(predict_chunk) -> None:
-    """One inference on grey frames before joining the room. The first call
-    pays for kernel selection and lazy init (seconds on a Jetson); paying it
-    here keeps it out of the first real chunk's latency."""
+    """Run one inference first so the first real chunk is not slow."""
     grey = np.full((480, 640, 3), 128, dtype=np.uint8)
     t = time.monotonic()
     predict_chunk({lbl: grey for lbl in predict_chunk.labels}, {j: 0.0 for j in JOINTS})
@@ -749,8 +794,7 @@ def drive(predict_chunk, s: Settings) -> None:
                              f"previous leader crashed, restart the follower.")
         print(f"control granted, schema {leader.schema}")
 
-        # Start from the arm's CURRENT pose. The initial all-zero action would
-        # otherwise be commanded until the first chunk lands.
+        # Hold the current pose until there is something better to send.
         t0 = time.monotonic()
         while True:
             obs = leader.observation()
@@ -762,41 +806,71 @@ def drive(predict_chunk, s: Settings) -> None:
             if time.monotonic() - t0 > 15:
                 raise SystemExit("no joint state from the follower in 15 s")
             time.sleep(0.05)
-        leader.set_action({j: joints[j] for j in JOINTS})
-        print("holding  " + "  ".join(f"{j}={joints[j]:+.1f}" for j in JOINTS))
+        start = {j: joints[j] for j in JOINTS}
+        leader.set_action(start)
+        print("start   " + "  ".join(f"{j}={start[j]:+.1f}" for j in LEROBOT_ORDER))
 
-        worker = threading.Thread(target=infer_forever,
-                                  args=(leader, predict_chunk, s, stop, ready),
-                                  name="inference", daemon=True)
-        worker.start()
+        # Move smoothly to the start pose before the policy takes over.
+        home = predict_chunk.home or start
+        dist = max(abs(home[j] - start[j]) for j in JOINTS)
+        dur = max(s.home_min_s, dist / s.home_speed) if dist > 0.5 else 0.0
 
-        # Video flows once the deadman is held and commands are ticking, so
-        # arm now; the arm holds its pose until the first chunk arrives.
+        def start_policy():
+            nonlocal worker
+            worker = threading.Thread(target=infer_forever,
+                                      args=(leader, predict_chunk, s, stop, ready),
+                                      name="inference", daemon=True)
+            worker.start()
+
+        # Video only flows while the deadman is held.
         leader.hold_deadman(True)
-        print("waiting for the first chunk (the arm holds still)...")
-        t_arm, driving = time.monotonic(), False
+        if dur:
+            print(f"homing: {dist:.0f} units on the farthest joint, {dur:.1f}s "
+                  f"(keep the workspace clear)", flush=True)
+        phase, t_phase, t_arm, driving = ("home" if dur else "settle"), time.monotonic(), 0.0, False
         for i in leader.ticks(hz=s.fps):
-            if not driving:
+            now = time.monotonic()
+            if phase == "home":
+                tau = min(1.0, (now - t_phase) / dur)
+                w = tau ** 3 * (10 - 15 * tau + 6 * tau * tau)
+                leader.set_action({j: start[j] + w * (home[j] - start[j]) for j in JOINTS})
+                if tau >= 1.0:
+                    phase, t_phase = "settle", now
+            elif phase == "settle":
+                if now - t_phase >= s.home_settle_s:
+                    obs = leader.observation()
+                    got = dict(obs.joints)
+                    for f in obs.images.values():
+                        f.release()
+                    err = max((abs(got[j] - home[j]) for j in JOINTS if j in got), default=0.0)
+                    print(f"at start pose (max error {err:.1f})"
+                          + ("  -- WARNING: arm did not reach it; check the follower's "
+                             "slew / obstacles" if err > 10 else ""), flush=True)
+                    print("waiting for the first chunk (the arm holds still)...", flush=True)
+                    start_policy()
+                    phase, t_arm = "policy", now
+            elif not driving:
                 if ready.is_set():
                     driving = True
                     print("armed, the policy is driving. ctrl-c once to stop.", flush=True)
-                elif time.monotonic() - t_arm > s.first_chunk_timeout_s:
+                elif now - t_arm > s.first_chunk_timeout_s:
                     raise SystemExit(f"no chunk in {s.first_chunk_timeout_s:.0f}s -- "
                                      f"see the camera lines above")
             if i % (s.fps * 5) == 0:
-                # in flight = sent, not yet applied; rising means a slow link
                 print(f"tick {i:6d}  sent={leader.commands_sent}  "
                       f"in flight={leader.seq - leader.applied_seq}  "
                       f"{leader.robot_safe_state}", flush=True)
-            if not worker.is_alive():
+            if worker is not None and not worker.is_alive():
                 raise SystemExit("the inference thread died -- see above")
     except KeyboardInterrupt:
         pass
     finally:
+        import signal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        print("stopping: releasing the deadman, leaving the room...", flush=True)
         stop.set()
         try:
-            # Stops the command stream; the follower's watchdog then holds the
-            # arm. Does not depend on the model cooperating.
+            # The follower holds the arm once commands stop.
             leader.hold_deadman(False)
         finally:
             if worker is not None:
