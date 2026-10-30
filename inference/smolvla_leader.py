@@ -5,6 +5,11 @@ notebook, a Jetson next to the arm, or a Mac.
 
     python smolvla_leader.py --policy user/my_smolvla --task "pick up the cube" --check
     python smolvla_leader.py --policy user/my_smolvla --task "pick up the cube"
+    python smolvla_leader.py --policy <training job id> --check
+
+--policy takes a checkpoint dir, Hub repo id, or a ZeroRuntime training job
+id (from the dashboard's Training page). A training job also supplies the
+task, the control rate and the joint order.
 
 Run --check first on a new machine. It loads the checkpoint without the robot,
 times inference and tells you if this machine is fast enough. On a Jetson or
@@ -28,6 +33,7 @@ import os
 import threading
 import time
 import traceback
+import uuid
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,6 +94,15 @@ class Settings:
     ramp_s: float = 1.5
     check: bool = False
     verbose: bool = False
+    zr_policy: object = None
+
+
+def _is_uuid(spec: str) -> bool:
+    try:
+        uuid.UUID(spec)
+        return True
+    except ValueError:
+        return False
 
 
 def _env(name, default=None):
@@ -99,8 +114,9 @@ def parse_args() -> Settings:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--env-file", help="extra .env to load (default: .env next to this file)")
-    p.add_argument("--policy", help="SmolVLA checkpoint dir or Hub repo id "
-                                    "[ZERORUNTIME_POLICY_PATH]")
+    p.add_argument("--policy", help="SmolVLA checkpoint dir, Hub repo id, or a ZeroRuntime "
+                   "training job id (from the dashboard's Training page) "
+                   "[ZERORUNTIME_POLICY_PATH]")
     p.add_argument("--task", help="training task text, word for word [ZERORUNTIME_TASK]")
     p.add_argument("--token", help="[ZERORUNTIME_AUTH_TOKEN]")
     p.add_argument("--meeting-id", help="[ZERORUNTIME_MEETING_ID]")
@@ -179,8 +195,8 @@ def parse_args() -> Settings:
                     else "  cp inference/.env.example inference/.env")
             raise SystemExit(f"set {env} (or {flag}) -- {what}\n{hint}")
     need(s.policy, "--policy", "ZERORUNTIME_POLICY_PATH",
-         "the checkpoint dir (with config.json) or a Hub repo id")
-    need(s.task, "--task", "ZERORUNTIME_TASK",
+         "the checkpoint dir (with config.json), a Hub repo id or a training job id")
+    need(s.task or _is_uuid(s.policy), "--task", "ZERORUNTIME_TASK",
          "the training task, word for word -- SmolVLA is conditioned on it")
     if not s.check:
         need(s.token, "--token", "ZERORUNTIME_AUTH_TOKEN", "your access token")
@@ -191,8 +207,16 @@ def parse_args() -> Settings:
 
 # ── Checkpoint ─────────────────────────────────────────────────────────────
 
-def resolve_checkpoint(spec: str) -> Path:
-    """Find the policy in a local folder or a Hub repo."""
+def resolve_checkpoint(spec: str, s: Settings) -> Path:
+    """Find the policy: a ZeroRuntime training job, a local folder or a Hub repo."""
+    if _is_uuid(spec):
+        from zeroruntime.teleops import Policy, PolicyError
+        try:
+            s.zr_policy = Policy.fetch(spec, token=s.token or None)
+        except PolicyError as exc:
+            raise SystemExit(str(exc)) from None
+        return s.zr_policy.path
+
     local = Path(spec).expanduser()
     if local.exists():
         for cand in (local, local / "pretrained_model",
@@ -391,10 +415,20 @@ def load_policy(s: Settings):
     from lerobot.policies import get_policy_class, make_pre_post_processors
     from lerobot.policies.utils import prepare_observation_for_inference
 
-    ckpt = resolve_checkpoint(s.policy)
+    ckpt = resolve_checkpoint(s.policy, s)
+    zp = s.zr_policy
+    task_src = "--task"
+    if zp and not s.task:
+        s.task, task_src = zp.task or "", "zeroruntime policy"
+        if not s.task:
+            raise SystemExit(f"training job {zp.id} has no task text -- set "
+                             f"ZERORUNTIME_TASK (or --task), word for word")
     train_cfg = read_train_config(ckpt)
-    info = dataset_file(s, train_cfg, "meta/info.json")
-    stats = dataset_file(s, train_cfg, "meta/stats.json")
+    # A dashboard policy names its dataset by recording id, which is not on the
+    # Hub, so only an explicit --dataset is looked up for one.
+    ds_cfg = {} if zp else train_cfg
+    info = dataset_file(s, ds_cfg, "meta/info.json")
+    stats = dataset_file(s, ds_cfg, "meta/stats.json")
 
     cfg = load_config(ckpt)
     if cfg.type != "smolvla":
@@ -449,6 +483,9 @@ def load_policy(s: Settings):
     if s.joint_order:
         act_order = st_order = tuple(s.joint_order)
         order_src = "--joint-order"
+    elif zp and zp.joints:
+        act_order = st_order = tuple(n.removesuffix(".pos") for n in zp.joints)
+        order_src = "zeroruntime policy"
     elif info and info["features"].get("action", {}).get("names"):
         feats = info["features"]
         act_order = tuple(n.removesuffix(".pos") for n in feats["action"]["names"])
@@ -480,6 +517,8 @@ def load_policy(s: Settings):
 
     if s.policy_hz:
         hz, hz_src = s.policy_hz, "--policy-hz"
+    elif zp and zp.fps:
+        hz, hz_src = float(zp.fps), "zeroruntime policy"
     elif info and info.get("fps"):
         hz, hz_src = float(info["fps"]), "dataset info.json"
     else:
@@ -489,7 +528,8 @@ def load_policy(s: Settings):
     slots = sorted(k.removeprefix("observation.images.") for k in cfg.image_features
                    if "empty_camera" not in k)
     cam_map, cam_src = {}, "checkpoint names"
-    for src, dst in (train_cfg.get("rename_map") or {}).items():
+    rename = train_cfg.get("rename_map") or (zp.rename_map if zp else {})
+    for src, dst in rename.items():
         if dst.startswith("observation.images.") and src.startswith("observation.images."):
             cam_map[dst.removeprefix("observation.images.")] = \
                 src.removeprefix("observation.images.")
@@ -507,7 +547,7 @@ def load_policy(s: Settings):
     print(f"  dtype   {'float32 (--fp32)' if s.fp32 else 'checkpoint default (bf16 + fp32)'}")
     print(f"  steps   {cfg.num_steps} denoising steps"
           + ("" if s.num_steps else "   (--num-steps 5 for ~2x speed on small GPUs)"))
-    print(f"  task    {s.task!r}")
+    print(f"  task    {s.task!r}   ({task_src})")
 
     fp32 = [s.fp32]
 
@@ -544,7 +584,7 @@ def load_policy(s: Settings):
     if mode == "current":
         home, home_src = None, "current pose (no move)"
     elif mode == "dataset":
-        found = dataset_start_pose(s, train_cfg, st_order)
+        found = dataset_start_pose(s, ds_cfg, st_order)
         home, home_src = found if found else (None, "current pose -- no dataset episodes "
                                                     "found, pass --dataset or --home")
     else:

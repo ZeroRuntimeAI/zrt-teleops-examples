@@ -23,11 +23,11 @@ it and it works.
 | | runs on | needs |
 |---|---|---|
 | `follower.py` | the robot | an SO-101, calibrated, plus its cameras |
-| `smolvla_leader.py` | wherever the model runs | a SmolVLA checkpoint, on disk or on the Hugging Face Hub |
+| `smolvla_leader.py` | wherever the model runs | a SmolVLA checkpoint: on disk, on the Hugging Face Hub, or trained in the dashboard |
 
 ## Needs
 
--    pip install "zeroruntime-teleops[lerobot]" "lerobot[smolvla]==0.6.1" python-dotenv opencv-python-headless
+-    pip install "zeroruntime-teleops[lerobot]>=0.1.2" "lerobot[smolvla]==0.6.1" python-dotenv opencv-python-headless
 - A room id and a token, the same on both hosts
 
 ```bash
@@ -38,7 +38,7 @@ Then open `.env` and fill it in.
 
 One copy per host: the session lines match, the hardware lines do not.
 
-`ZERORUNTIME_TASK` is required: SmolVLA is language conditioned, and the string has
+`ZERORUNTIME_TASK` is required, unless the policy is a training job id: SmolVLA is language conditioned, and the string has
 to match what the checkpoint was trained on.
 
 ## Getting a checkpoint
@@ -79,6 +79,24 @@ just holds.
 It does this task, on a setup like the one it was recorded on: same
 cameras, similar placement, an orange cube and a white bowl. A different
 scene or task needs your own fine-tune.
+
+## Using a policy trained in the dashboard
+
+Copy the training job id from the Training page and use it as the policy:
+
+```
+ZERORUNTIME_POLICY_PATH=123e4567-e89b-42d3-a456-426614174000
+```
+
+or pass `--policy <id>`. The leader downloads the checkpoint once with your
+`ZERORUNTIME_AUTH_TOKEN` into `~/.cache/zeroruntime/policies/<id>/`; later
+runs start from the cache. The rate, joint order and task come from the
+training job, so `ZERORUNTIME_TASK` and `ZERORUNTIME_DATASET_ROOT` can stay
+empty; set `ZERORUNTIME_TASK` only to override it. The training job must have
+finished.
+
+The dashboard does not serve the training episodes, so the arm starts from
+where it is. Pass `--home` with a pose to move there first.
 
 ## Run
 
