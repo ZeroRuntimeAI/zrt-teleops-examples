@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Arm Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --bg: oklch(97% 0.012 85);
+    --surface: oklch(99.5% 0.004 85);
+    --ink: oklch(22% 0.02 260);
+    --muted: oklch(50% 0.02 260);
+    --line: oklch(88% 0.012 85);
+    --signal: oklch(70% 0.16 65);
+    --ok: oklch(60% 0.14 150);
+    --danger: oklch(57% 0.21 27);
+    --danger-deep: oklch(42% 0.17 27);
+    --font-ui: "Instrument Sans", system-ui, sans-serif;
+    --font-data: "JetBrains Mono", ui-monospace, monospace;
+    --space: clamp(12px, 0.6rem + 1.2vw, 28px);
+    --radius-lg: 20px;
+    --radius-sm: 8px;
+    --fast: 150ms;
+    --normal: 300ms;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: oklch(17% 0.015 260); --surface: oklch(22% 0.016 260);
+      --ink: oklch(94% 0.01 85); --muted: oklch(68% 0.02 260); --line: oklch(31% 0.016 260);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: oklch(17% 0.015 260); --surface: oklch(22% 0.016 260);
+    --ink: oklch(94% 0.01 85); --muted: oklch(68% 0.02 260); --line: oklch(31% 0.016 260);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--font-ui); }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+           padding: var(--space) var(--space) calc(var(--space) / 2); }
+  h1 { margin: 0; font-size: clamp(1.4rem, 1rem + 2vw, 2.4rem); letter-spacing: -0.02em; line-height: 1; }
+  h1 small { display: block; margin-top: 6px; font: 400 0.8rem var(--font-data); color: var(--muted); letter-spacing: 0.04em; }
+  h2 { margin: 0 0 10px; font: 600 0.75rem var(--font-data); text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+  .chip { font: 600 0.75rem var(--font-data); text-transform: uppercase; letter-spacing: 0.1em;
+          padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .chip[data-state="listening"] { color: var(--ok); border-color: var(--ok); }
+  .chip[data-state="thinking"] { color: var(--ink); border-color: var(--ink); }
+  .chip[data-state="speaking"] { color: var(--signal); border-color: var(--signal); }
+  main { display: grid; gap: var(--space); padding: 0 var(--space) var(--space);
+         grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); align-items: start; }
+  @media (max-width: 820px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .stage { position: relative; aspect-ratio: 4 / 3; background: oklch(12% 0.01 260); border-radius: var(--radius-lg);
+           overflow: hidden; box-shadow: 0 24px 60px -32px oklch(0% 0 0 / 0.55); }
+  .stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .stage .empty { position: absolute; inset: 0; margin: 0; display: grid; place-items: center;
+                  font: 400 0.85rem var(--font-data); color: oklch(75% 0.01 85); }
+  .mode { position: absolute; left: 14px; top: 14px; margin: 0; padding: 4px 10px; border-radius: var(--radius-sm);
+          font: 600 0.75rem var(--font-data); letter-spacing: 0.1em; text-transform: uppercase;
+          background: oklch(0% 0 0 / 0.55); color: oklch(92% 0.01 85); }
+  .mode[data-mode="moving"] { background: var(--signal); color: oklch(18% 0.02 60); }
+  .mode[data-mode="policy"] { background: var(--ink); color: var(--bg); }
+  .mode[data-mode="dancing"] { background: var(--signal); color: oklch(18% 0.02 60); }
+  .dance { position: absolute; right: 14px; top: 14px; margin: 0; display: flex; align-items: center; gap: 8px;
+           padding: 4px 10px; border-radius: var(--radius-sm); background: oklch(0% 0 0 / 0.55);
+           color: oklch(92% 0.01 85); font: 600 0.75rem var(--font-data); letter-spacing: 0.08em; }
+  .beat { width: 10px; height: 10px; border-radius: 50%; background: var(--signal); opacity: 0.35; }
+  .beat.on { animation: beat 220ms ease-out; }
+  @keyframes beat { from { transform: scale(1.8); opacity: 1; } to { transform: scale(1); opacity: 0.35; } }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .tabs button { font: 600 0.8rem var(--font-data); padding: 6px 12px; border-radius: var(--radius-sm);
+                 border: 1px solid var(--line); background: var(--surface); transition: border-color var(--fast); }
+  .tabs button:hover { border-color: var(--ink); }
+  .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  aside { display: grid; gap: var(--space); }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; }
+  .join { flex: 1; }
+  .join, .mic { min-height: 48px; padding: 0 18px; border-radius: var(--radius-sm); border: 1px solid var(--ink);
+                background: var(--ink); color: var(--bg); font-weight: 600; transition: transform var(--fast); }
+  .mic { background: var(--surface); color: var(--ink); }
+  .mic[aria-pressed="false"] { border-style: dashed; color: var(--muted); }
+  .join:hover, .mic:hover { transform: translateY(-1px); }
+  .stop { flex-basis: 100%; min-height: 84px; border: 0; border-radius: var(--radius-lg);
+          background: var(--danger); color: oklch(98% 0.01 85); font: 700 1.6rem var(--font-ui); letter-spacing: 0.18em;
+          box-shadow: 0 6px 0 var(--danger-deep); transition: transform var(--fast), box-shadow var(--fast); }
+  .stop:hover { transform: translateY(-1px); box-shadow: 0 7px 0 var(--danger-deep); }
+  .stop:active { transform: translateY(5px); box-shadow: 0 1px 0 var(--danger-deep); }
+  .stop:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .stop kbd { display: block; font: 400 0.7rem var(--font-data); letter-spacing: 0.1em; opacity: 0.8; }
+  button:focus-visible { outline: 3px solid var(--signal); outline-offset: 3px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space); }
+  .joints { display: grid; gap: 8px; }
+  .row { display: grid; grid-template-columns: 7.2rem 1fr 3rem; align-items: center; gap: 10px;
+         font: 400 0.8rem var(--font-data); }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { position: relative; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar i { position: absolute; inset: 0; background: var(--ink); transform-origin: left center;
+           transform: scaleX(var(--v, 0)); transition: transform var(--normal) cubic-bezier(0.16, 1, 0.3, 1); }
+  .log { list-style: none; margin: 0; padding: 0; max-height: 42vh; overflow: auto; font: 400 0.82rem/1.4 var(--font-data); }
+  .log li { padding: 7px 0; border-bottom: 1px dashed var(--line); overflow-wrap: anywhere; }
+  .log li:first-child { animation: in var(--normal) ease-out; }
+  .log .heard { font-family: var(--font-ui); font-size: 0.95rem; }
+  .log .heard::before { content: "you · "; color: var(--muted); font: 400 0.75rem var(--font-data); }
+  .log .ok::before { content: "✓ "; color: var(--ok); }
+  .log .bad::before { content: "✗ "; color: var(--danger); }
+  .log .note { color: var(--muted); }
+  @keyframes in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before { transition: none !important; animation: none !important; } }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Voice Arm<small>SO-101 · voice agent · one room</small></h1>
+  <span class="chip" id="agent" data-state="offline" aria-live="polite">offline</span>
+</header>
+<main>
+  <section aria-labelledby="cam-h">
+    <h2 id="cam-h" class="visually-hidden">Robot camera</h2>
+    <div class="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <p class="empty" id="empty">waiting for the robot's camera…</p>
+      <p class="mode" id="mode" data-mode="idle">idle</p>
+      <p class="dance" id="dance" hidden><span class="beat" id="beat"></span><span id="bpm">-- BPM</span></p>
+    </div>
+    <div class="tabs" id="tabs" role="tablist" aria-label="Robot cameras"></div>
+  </section>
+  <aside>
+    <div class="controls">
+      <button class="join" id="join" type="button">Join and talk</button>
+      <button class="mic" id="mic" type="button" aria-pressed="true" hidden>Mic on</button>
+      <button class="stop" id="stop" type="button" disabled>STOP<kbd>space</kbd></button>
+    </div>
+    <section class="panel" aria-labelledby="arm-h">
+      <h2 id="arm-h">Arm</h2>
+      <div class="joints" id="joints"></div>
+    </section>
+    <section class="panel" aria-labelledby="log-h">
+      <h2 id="log-h">Conversation</h2>
+      <ol class="log" id="log" aria-live="polite"></ol>
+    </section>
+  </aside>
+</main>
+<div id="audio" hidden></div>
+<script src="https://sdk.videosdk.live/js-sdk/1.1.0/videosdk.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const q = new URLSearchParams(location.search);
+  const ROOM = q.get("room"), TOKEN = q.get("token");
+  // Display ranges only; the arm's real limits live in skills.py.
+  const RANGE = { gripper: [0, 100], wrist_roll: [-150, 150] };
+  const videos = new Map();     // tab label -> MediaStream
+  const bars = new Map();       // joint -> { fill, out }
+  let meeting = null, current = null;
+
+  // Room messages are text, never markup: textContent only.
+  function log(cls, text) {
+    const li = document.createElement("li");
+    li.className = cls;
+    li.textContent = text;
+    $("log").prepend(li);
+    while ($("log").children.length > 80) $("log").lastChild.remove();
+  }
+
+  function show(key) {
+    current = key ?? null;
+    $("video").srcObject = current ? videos.get(current) : null;
+    $("empty").hidden = videos.size > 0;
+    for (const b of $("tabs").children) b.setAttribute("aria-selected", String(b.dataset.key === current));
+  }
+
+  function renderTabs() {
+    $("tabs").replaceChildren(...[...videos.keys()].map((key) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.setAttribute("role", "tab"); b.dataset.key = key; b.textContent = key;
+      b.onclick = () => show(key);
+      return b;
+    }));
+    show(videos.has(current) ? current : videos.keys().next().value);
+  }
+
+  const keyOf = (p, s) => `${p.displayName || p.id} · ${String(s.id).slice(0, 4)}`;
+
+  function attach(p, s) {
+    const key = keyOf(p, s);
+    if (s.kind === "video") { videos.set(key, new MediaStream([s.track])); renderTabs(); }
+    // A stream can arrive twice (already in p.streams, then stream-enabled):
+    // one element per stream, or the agent is heard twice.
+    if (s.kind === "audio" && ![...$("audio").children].some((a) => a.dataset.key === key)) {
+      const a = document.createElement("audio");
+      a.autoplay = true; a.dataset.key = key; a.srcObject = new MediaStream([s.track]);
+      $("audio").append(a);
+    }
+  }
+
+  function detach(p, s) {
+    const key = keyOf(p, s);
+    if (videos.delete(key)) renderTabs();
+    for (const a of [...$("audio").children]) if (a.dataset.key === key) a.remove();
+  }
+
+  function watch(p) {
+    p.on("stream-enabled", (s) => attach(p, s));
+    p.on("stream-disabled", (s) => detach(p, s));
+    p.streams?.forEach((s) => attach(p, s));
+  }
+
+  function bar(name) {
+    if (!bars.has(name)) {
+      const row = document.createElement("div"); row.className = "row";
+      const label = document.createElement("span"); label.textContent = name.replace("_", " ");
+      const track = document.createElement("span"); track.className = "bar";
+      const fill = document.createElement("i"); track.append(fill);
+      const out = document.createElement("output");
+      row.append(label, track, out); $("joints").append(row);
+      bars.set(name, { fill, out });
+    }
+    return bars.get(name);
+  }
+
+  function renderState(e) {
+    $("mode").textContent = e.control ? e.mode : "no control";
+    $("mode").dataset.mode = e.mode;
+    for (const [name, raw] of Object.entries(e.joints)) {
+      const v = Number(raw);
+      if (!Number.isFinite(v)) continue;
+      const [lo, hi] = RANGE[name] ?? [-90, 90];
+      const { fill, out } = bar(name);
+      fill.style.setProperty("--v", String(Math.min(1, Math.max(0, (v - lo) / (hi - lo)))));
+      out.textContent = v.toFixed(0);
+    }
+  }
+
+  function onEvent(msg) {
+    let e;
+    try { e = JSON.parse(msg.message); } catch { return; }
+    if (!e || typeof e !== "object") return;
+    if (e.t === "heard") log("heard", String(e.text ?? ""));
+    else if (e.t === "tool") {
+      const args = Object.values(e.args ?? {}).join(", ");
+      const why = e.ok ? "" : ` — ${e.result?.error ?? "failed"}`;
+      log(e.ok ? "ok" : "bad", `${e.name}(${args})${why}`);
+    } else if (e.t === "state" && e.joints && typeof e.joints === "object") renderState(e);
+    else if (e.t === "agent") { $("agent").textContent = String(e.state); $("agent").dataset.state = String(e.state); }
+  }
+
+  $("join").onclick = () => {
+    if (!ROOM || !TOKEN) { log("bad", "open the link agent.py printed: it carries ?room=…&token=…"); return; }
+    $("join").disabled = true;
+    VideoSDK.config(TOKEN);
+    meeting = VideoSDK.initMeeting({ meetingId: ROOM, name: "operator", micEnabled: true, webcamEnabled: false });
+    meeting.on("meeting-joined", () => {
+      $("join").hidden = true; $("mic").hidden = false; $("stop").disabled = false;
+      $("agent").textContent = "waiting"; $("agent").dataset.state = "waiting";
+      meeting.pubSub.subscribe("ROBOT_EVENTS", onEvent);
+      meeting.participants.forEach((p) => watch(p));
+      log("note", "joined — try \"open your gripper\"");
+      startMusic();
+    });
+    meeting.on("participant-joined", watch);
+    meeting.on("error", (err) => log("bad", `room error: ${err?.message ?? err}`));
+    meeting.join();
+  };
+
+  // -- music: tempo and beats from a local mic stream, sent to the robot --------
+  // Onsets: spectral flux in the low band (kick and bass) over an adaptive
+  // threshold. Tempo: the beat period, 60-180 BPM, that the most gaps between
+  // recent onsets are 1, 2 or 3 whole beats of. Sent twice a second while
+  // it holds steady.
+  const STEADY = 0.5;          // share of gaps on the beat; random onsets score < 0.4
+  window.STEADY = STEADY;
+
+  function isOnset(flux, history) {
+    if (history.length < 20) return false;
+    const mean = history.reduce((a, b) => a + b, 0) / history.length;
+    const sd = Math.sqrt(history.reduce((a, b) => a + (b - mean) ** 2, 0) / history.length);
+    return flux > mean + 1.5 * sd && flux > mean * 1.3 && flux > 1e-3;
+  }
+
+  function tempoOf(onsets) {
+    if (onsets.length < 6) return null;
+    const end = onsets[onsets.length - 1];
+    const recent = onsets.filter((t) => t > end - 6);
+    if (recent.length < 6) return null;
+    const gaps = [];
+    for (let i = 0; i < recent.length; i++)
+      for (let j = i + 1; j < Math.min(recent.length, i + 4); j++) gaps.push(recent[j] - recent[i]);
+    let best = [];
+    for (let p = 1 / 3; p <= 1.0; p += 0.005) {
+      const fit = gaps.map((g) => [g, Math.round(g / p)])
+        .filter(([g, k]) => k >= 1 && k <= 3 && Math.abs(g - k * p) <= 0.03);
+      if (fit.length > best.length) best = fit;
+    }
+    if (!best.length) return null;
+    const period = best.reduce((a, [g, k]) => a + g / k, 0) / best.length;
+    return { bpm: 60 / period, confidence: best.length / gaps.length };
+  }
+  window.tempoOf = tempoOf;
+  window.isOnset = isOnset;
+
+  const music = { ctx: null, an: null, prev: null, flux: [], onsets: [], lastOnset: -1,
+                  energy: 0, peak: 1e-3, steadySince: 0, heard: false, mutedByUs: false,
+                  override: false, lastSend: 0 };
+
+  async function startMusic() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(
+        { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      music.ctx = new AudioContext();
+      await music.ctx.resume();
+      const src = music.ctx.createMediaStreamSource(stream);
+      music.an = music.ctx.createAnalyser();
+      music.an.fftSize = 1024;
+      src.connect(music.an);
+      setInterval(listen, 25);
+    } catch (err) {
+      log("bad", `music listening off: ${err?.message ?? err}`);
+    }
+  }
+
+  function listen() {
+    const an = music.an, t = music.ctx.currentTime;
+    const spec = new Float32Array(an.frequencyBinCount);
+    an.getFloatFrequencyData(spec);                     // dB
+    const low = spec.slice(1, 6).map((db) => Math.pow(10, db / 20));
+    let flux = 0;
+    if (music.prev) low.forEach((v, i) => { flux += Math.max(0, v - music.prev[i]); });
+    music.prev = low;
+    const wave = new Float32Array(an.fftSize);
+    an.getFloatTimeDomainData(wave);
+    const rms = Math.sqrt(wave.reduce((a, b) => a + b * b, 0) / wave.length);
+    music.peak = Math.max(rms, music.peak * 0.999);
+    music.energy = 0.9 * music.energy + 0.1 * Math.min(1, rms / music.peak);
+    if (isOnset(flux, music.flux) && t - music.lastOnset > 0.25) {
+      music.onsets.push(t);
+      music.lastOnset = t;
+      music.onsets = music.onsets.filter((x) => x > t - 8);
+      pulse();
+    }
+    music.flux.push(flux);
+    if (music.flux.length > 43) music.flux.shift();
+    if (performance.now() - music.lastSend > 500) decide(t);
+  }
+
+  function decide(t) {
+    music.lastSend = performance.now();
+    const tempo = tempoOf(music.onsets);
+    const steady = tempo && tempo.confidence >= STEADY && t - music.lastOnset < 3;
+    if (steady && !music.steadySince) music.steadySince = t;
+    if (!steady) music.steadySince = 0;
+    if (steady && t - music.steadySince >= 2) {
+      if (!music.heard) {
+        music.heard = true;
+        $("dance").hidden = false;
+        log("note", "music heard — click Mic on to talk over it");
+      }
+      const beatAt = Date.now() - (t - music.lastOnset) * 1000;
+      meeting?.pubSub.publish("ROBOT_CTRL", JSON.stringify({
+        cmd: "music", bpm: Math.round(tempo.bpm), beat_at: Math.round(beatAt),
+        energy: +music.energy.toFixed(2), now: Date.now() }), { persist: false });
+      $("bpm").textContent = `${Math.round(tempo.bpm)} BPM`;
+    } else if (music.heard && t - music.lastOnset >= 3) {
+      endMusic();
+    }
+    syncMic();
+  }
+
+  function endMusic() {
+    music.heard = false;
+    music.override = false;
+    meeting?.pubSub.publish("ROBOT_CTRL", JSON.stringify({ cmd: "music_stop" }), { persist: false });
+    $("dance").hidden = true;
+    log("note", "music stopped");
+    syncMic();
+  }
+
+  // While music plays the mic is paused, so the agent doesn't answer the
+  // lyrics. Clicking Mic overrides that until the music stops: that is how
+  // to say "dance to this" over a song.
+  function syncMic() {
+    if (!meeting) return;
+    const mute = music.heard && !music.override;
+    if (mute && !music.mutedByUs && micOn()) {
+      setMic(false);
+      music.mutedByUs = true;
+      log("note", "mic paused for the music — STOP and Space still work");
+    } else if (!mute && music.mutedByUs) {
+      setMic(true);
+      music.mutedByUs = false;
+      log("note", "mic back on");
+    }
+  }
+
+  function pulse() {
+    const dot = $("beat");
+    dot.classList.remove("on");
+    void dot.offsetWidth;                                // restart the animation
+    dot.classList.add("on");
+  }
+
+  $("stop").onclick = () => {
+    meeting?.pubSub.publish("ROBOT_CTRL", JSON.stringify({ cmd: "stop" }), { persist: false });
+    log("note", "STOP sent");
+  };
+
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || !meeting || e.target.closest("button")) return;
+    e.preventDefault();
+    $("stop").click();
+  });
+
+  const micOn = () => $("mic").getAttribute("aria-pressed") === "true";
+
+  function setMic(on) {
+    on ? meeting.unmuteMic() : meeting.muteMic();
+    $("mic").setAttribute("aria-pressed", String(on));
+    $("mic").textContent = on ? "Mic on" : "Mic off";
+  }
+
+  $("mic").onclick = () => {
+    music.mutedByUs = false;            // the user's choice wins ...
+    if (music.heard) music.override = true;   // ... until the music stops
+    setMic(!micOn());
+  };
+</script>
+</body>
+</html>

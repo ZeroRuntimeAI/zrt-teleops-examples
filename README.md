@@ -37,6 +37,7 @@ robot should move to.
 | Example | Hardware | Machines | Platform | What it shows |
 |---|---|---|---|---|
 | [`quickstart/`](quickstart/) | none (webcams optional) | 1 or 2 | Linux, macOS | A full session with simulated arms on both ends |
+| [`studio/`](studio/) | none | 1 | Any browser | A physics-simulated SO-101 in your browser tab |
 | [`so101/`](so101/) | 2× SO-101 arms | 1 or 2 | Linux, macOS | Drive a real arm from a real arm, through LeRobot |
 | [`inference/`](inference/) | 1× SO-101 + a SmolVLA checkpoint | 2 | Linux, macOS | A policy drives the arm instead of a person |
 | [`ros2/`](ros2/) | 2× SO-101 arms | 2 | Ubuntu 24.04 + ROS 2 Jazzy, or Docker on any 64-bit Linux | The `so101/` session, with each arm behind ros2_control |
@@ -49,6 +50,8 @@ Each example changes one thing from the one before it:
 
 - **`quickstart/` → `so101/`** replaces the simulated arms with real ones.
   The session code is the same.
+- **`quickstart/` → `studio/`** replaces the lag-model follower with a
+  physics-simulated arm in a browser tab.
 - **`so101/` → `inference/`** replaces the person with a model. The robot side
   is unchanged: the follower cannot tell a policy from a human, and applies
   the same limits to both.

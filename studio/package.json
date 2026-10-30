@@ -1,0 +1,40 @@
+{
+  "name": "zeroruntime-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@mujoco/mujoco": "3.16.0",
+    "@react-three/fiber": "^9.8.2",
+    "@videosdk.live/js-sdk": "1.2.1",
+    "@zeroruntime/teleops-wasm": "file:../../../../videosdk-rust-sdk/.worktrees/feat-teleop-wasm/crates/zeroruntime-teleop-wasm/dist/zeroruntime-teleops-wasm-0.0.1-beta.5.tgz",
+    "ioredis": "^6.0.0",
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^20.19.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

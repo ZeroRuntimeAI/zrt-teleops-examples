@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# next
+.next/
+out/
+next-env.d.ts
+
+# build / type-check caches
+*.tsbuildinfo
+
+# tests
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# env (keep the .env.example template)
+.env
+.env.*
+!.env.example
+
+.DS_Store
+
+# temporary local copy of the teleops-wasm tarball (scripts/vendor-wasm.sh); never commit
+vendor/

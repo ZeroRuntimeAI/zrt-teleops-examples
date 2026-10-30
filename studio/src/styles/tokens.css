@@ -1,0 +1,45 @@
+/*
+ * Studio design tokens. Tailwind v4 turns each --color-* into a utility (bg-surface, text-primary, ...)
+ * and also emits it as a custom property on :root.
+ *
+ * The default palette, radii and shadows are cleared on purpose: Studio has square corners
+ * (only `rounded-full` dots), no box shadows on UI chrome, and one deliberate palette.
+ */
+@theme static {
+  --color-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+
+  --color-background: oklch(0.1774 0.0044 264.46);
+  --color-surface: #101113; /* neutral-950 */
+  --color-surface-raised: #1b1b1e; /* neutral-900 */
+  --color-hairline: #ffffff0d;
+  --color-hairline-strong: #ffffff1a;
+  --color-primary: #8ecff2;
+  --color-on-primary: #0a0f12;
+  --color-foreground: #ededef;
+  --color-muted: #9a9a9f;
+
+  /* Safe-state pills */
+  --color-status-active: #4ade80;
+  --color-status-holding: #facc15;
+  --color-status-estopped: #f87171;
+  --color-status-disconnected: #8b8b8f; /* AA (4.5:1) as pill text on the dark chrome */
+
+  /* UI type below Tailwind's text-xs/sm steps: mono labels and dense controls. */
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1rem;
+  --text-ui: 0.8125rem;
+  --text-ui--line-height: 1.25rem;
+
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+}
+
+/* The families come from next/font (--font-inter, --font-geist-mono); `inline` resolves the var where it is used. */
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}

@@ -1,0 +1,8 @@
+# The context is the repo root: send only what the image copies.
+*
+!voice
+!studio/agent
+!studio/public/sim
+**/__pycache__
+**/.env
+voice/logs
