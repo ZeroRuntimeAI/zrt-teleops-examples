@@ -1,0 +1,215 @@
+"""
+Follower host -- run this on the machine holding the follower arm.
+
+    python follower.py
+
+`arm` is an ordinary lerobot Robot, unmodified. `SO101FollowerAdapter` wraps
+it and owns the network session: joining the room, publishing joints and
+video, and clamping incoming actions before applying them.
+
+Nothing here touches the servo bus -- lerobot stays the only owner.
+
+Every attached camera is published. Name them with CAMERA_LABELS below --
+a policy looks its cameras up by name.
+
+Needs ZERORUNTIME_AUTH_TOKEN, ZERORUNTIME_MEETING_ID, ZERORUNTIME_FOLLOWER_ID,
+ZERORUNTIME_FOLLOWER_PORT -- see .env.example.
+
+SETTINGS -- edit the block below the imports:
+
+    CAMERA_LABELS      what to call the cameras that are found
+    WIDTH, HEIGHT      what each camera is asked for
+    FOURCC             camera pixel format
+    WATCHDOG_TIMEOUT_S how long silence may last before the arm holds
+
+`slew` is ZERORUNTIME_SLEW in .env, because it is the one number that changes per
+run rather than per rig.
+"""
+
+import os
+import sys
+
+from lerobot.cameras.opencv import OpenCVCameraConfig
+from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
+
+from zeroruntime.teleops import (FailsafeAction, SafetyConfig,
+                             available_cameras)
+from zeroruntime.teleops.adapters.lerobot import SO101FollowerAdapter
+
+from config import (FPS, MEETING_ID, SLEW, TOKEN, calibration_id,
+                    device, explain)
+
+
+def works(handle) -> bool:
+    """Does this handle actually deliver a picture?
+
+    `available_cameras()` lists every V4L2 capture node, which on a Pi
+    includes the hardware codec and the image pipeline. Neither is a camera.
+    """
+    import cv2
+    cap = (cv2.VideoCapture(handle, cv2.CAP_V4L2)
+           if sys.platform.startswith("linux") else cv2.VideoCapture(handle))
+    ok = cap.isOpened() and cap.read()[0]
+    cap.release()
+    return ok
+
+
+def find_cameras() -> dict:
+    """Every attached camera, as `{label: handle}`.
+
+    With CAMERA_PORTS set, each camera is named by the USB port it is plugged
+    into, and a missing one stops the script. A dataset recorded with a camera
+    missing would otherwise shift the names onto the wrong views. Without it,
+    named by CAMERA_LABELS in discovery order, falling back to cam0, cam1...
+    """
+    found = [d for d in available_cameras() if works(_handle(d))]
+    if CAMERA_PORTS:
+        cams = {label: _handle(d) for d in found
+                for port, label in CAMERA_PORTS.items() if port in d.path}
+        missing = [f"{label} (USB {port})" for port, label in CAMERA_PORTS.items()
+                   if label not in cams]
+        if missing:
+            sys.exit("camera not found: " + ", ".join(missing) +
+                     "\n  check its cable (`lsusb`, `ls /dev/v4l/by-path`); refusing "
+                     "to record with the wrong views under these names")
+        return cams
+    return {(CAMERA_LABELS[i] if i < len(CAMERA_LABELS) else f"cam{i}"):
+            _handle(d) for i, d in enumerate(found)}
+
+
+def _handle(d):
+    """What to OPEN the camera with: an index on macOS, /dev/videoN on Linux.
+
+    Not `d.path`. That is the /dev/v4l/by-path symlink, which is the right
+    thing to IDENTIFY a camera by -- it names the USB port, so it survives a
+    replug where /dev/videoN does not -- but some OpenCV builds, the Jetson's
+    among them, refuse to open a capture device by filename at all:
+
+        VIDEOIO(V4L2): backend is generally available but can't be used to
+        capture by name
+
+    Every camera then fails `works()`, the list comes back empty, and the
+    error blames the port names, which were fine. So: match on the symlink,
+    open what it points at.
+    """
+    if sys.platform == "darwin":
+        return int(d.name)
+    return os.path.realpath(d.path)
+
+
+# ── Settings ───────────────────────────────────────────────────────────────
+
+#: Names for the cameras that are found, in discovery order. A policy looks
+#: its cameras up by NAME, so these must match what its checkpoint expects
+#: (SmolVLA checkpoints usually want camera1, camera2, ...). Anything beyond
+#: this list is named cam2, cam3, ... Empty means cam0, cam1, ... throughout,
+#: which is fine for teleoperation, where nothing reads the names.
+#:
+#: Discovery order follows the device list, NOT which camera is which. Check
+#: the mapping printed at startup and reorder if a replug shuffled them.
+CAMERA_LABELS: list[str] = []
+
+#: Name cameras by USB port instead (a substring of their /dev/v4l/by-path
+#: name), which survives a missing camera. Overrides CAMERA_LABELS. These names
+#: become the dataset's camera keys and so the policy's inputs: they are
+#: pi0.5's own (pi05_base), so the dataset needs no remapping to train it.
+CAMERA_PORTS: dict[str, str] = {
+    # "usb-0:2.2:": "base_0_rgb",          # top view
+    # "usb-0:2.1:": "left_wrist_0_rgb",    # wrist (Xitech)
+    # "usb-0:2.4:": "right_wrist_0_rgb",   # side view (pi0.5 has 3 slots; this is the third)
+}
+
+#: What each camera is asked for.
+WIDTH, HEIGHT = 640, 480
+
+#: Not optional with two cameras on one USB 2.0 bus: raw YUYV is ~18 MB/s
+#: each and the second camera fails to open.
+FOURCC = "MJPG"
+
+#: Silence for this long and the arm holds where it is.
+WATCHDOG_TIMEOUT_S = 0.5
+
+#: Record episodes to the ZeroRuntime cloud (billed). Convert and fine-tune
+#: from the ZeroRuntime dashboard.
+RECORD = True
+
+#: Recorded frames per second: the dataset's fps, and so the rate a policy
+#: trained on it must run at. The SDK default is 10. Observations are only
+#: taken on a control tick, so anything above ZERORUNTIME_FPS is capped there.
+OBSERVATION_HZ = 10
+
+#: Episodes are opened and closed by leader.py, carrying its task text
+#: (ZERORUNTIME_TASK): a policy is conditioned on that text. True lets the
+#: runtime open untitled episodes on every deadman squeeze instead.
+AUTO_EPISODE = False
+
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def main() -> None:
+    # Here, not at import: this opens each device briefly to see whether it
+    # is really a camera, and importing a module should open nothing.
+    cameras = find_cameras()
+
+    port = device("ZERORUNTIME_FOLLOWER_PORT",
+                  "the serial port of the follower arm; "
+                  "`lerobot-find-port` finds it")
+    arm = SO101Follower(
+        SO101FollowerConfig(
+            id=calibration_id("ZERORUNTIME_FOLLOWER_ID", leader=False),
+            port=port,
+            cameras={
+                name: OpenCVCameraConfig(index_or_path=handle, fps=FPS,
+                                         width=WIDTH, height=HEIGHT,
+                                         fourcc=FOURCC)
+                for name, handle in cameras.items()
+            },
+        )
+    )
+
+    # Slew, watchdog and e-stop sit inside the control loop -- tick() is the
+    # only path to the motors, so there is no wrapper to forget.
+    follower = SO101FollowerAdapter(
+        MEETING_ID,
+        robot=arm,
+        token=TOKEN,
+        safety=SafetyConfig(
+            # ZERORUNTIME_SLEW. Re-derive on your own arm: too low limits the
+            # operator's motion, too high lets a bad reading through.
+            slew=SLEW,
+            watchdog_timeout_s=WATCHDOG_TIMEOUT_S,
+            # HOLD, not TORQUE_OFF: cutting torque drops a loaded arm.
+            on_starvation=FailsafeAction.HOLD,
+        ),
+        cloud_recording=True,
+        record="./sessions" if RECORD else None,
+        observation_hz=OBSERVATION_HZ,
+    )
+
+    @follower.on_safe_state
+    def _(state, reason):
+        print(f"  safety: {state.value}" + (f" ({reason.value})" if reason else ""))
+
+    @follower.on_rejected
+    def _(seq, why):
+        print(f"  rejected seq={seq}: {why}")
+
+    follower.auto_episode = AUTO_EPISODE   # read at start(), so set it first
+
+    print(f"robot ready in {MEETING_ID}")
+    print(f"  joints  {follower.joints}")
+    for label, handle in cameras.items():
+        print(f"  camera  {label:<16} {str(handle).split('/')[-1][:44]}")
+    if not cameras:
+        print("  cameras [] (none attached)")
+    print(f"  record  {OBSERVATION_HZ} fps" if RECORD else "  record  off")
+    print(f"  slew    {SLEW} per tick ({SLEW * FPS:.0f} units/s at {FPS} Hz)")
+
+    try:
+        follower.run(hz=FPS)      # start(), loop, stop() -- ctrl-c is handled
+    except Exception as exc:
+        raise explain(exc) or exc
+
+
+if __name__ == "__main__":
+    main()
