@@ -33,13 +33,13 @@ git clone https://github.com/ZeroRuntimeAI/zrt-teleops-examples.git && cd zrt-te
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install -r requirements.txt
+pip install -U -r requirements.txt
 ```
 
  For `so101/`, add the SO-101 adapters:
 
 ```bash
-pip install "zeroruntime-teleops[lerobot]"
+pip install -U "zeroruntime-teleops[lerobot]"
 ```
 
 For `inference/`, add SmolVLA on top of that:
@@ -54,7 +54,7 @@ For `ros2/`, install into the Python ROS 2 Jazzy uses, not this venv —
 [`ros2/README.md`](ros2/README.md#needs) has the details:
 
 ```bash
-pip install "zeroruntime-teleops[ros2]"
+pip install -U "zeroruntime-teleops[ros2]"
 ```
 
 | OS    | Architecture     |

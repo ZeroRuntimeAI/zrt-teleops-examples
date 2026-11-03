@@ -111,12 +111,12 @@ CAMERA_LABELS: list[str] = []
 
 #: Name cameras by USB port instead (a substring of their /dev/v4l/by-path
 #: name), which survives a missing camera. Overrides CAMERA_LABELS. These names
-#: become the dataset's camera keys and so the policy's inputs: they are
-#: pi0.5's own (pi05_base), so the dataset needs no remapping to train it.
+#: become the dataset's camera keys and so the policy's inputs. top, wrist and
+#: side are the names zero-runtime/so101_pick_place_bowl was recorded with.
 CAMERA_PORTS: dict[str, str] = {
-    # "usb-0:2.2:": "base_0_rgb",          # top view
-    # "usb-0:2.1:": "left_wrist_0_rgb",    # wrist (Xitech)
-    # "usb-0:2.4:": "right_wrist_0_rgb",   # side view (pi0.5 has 3 slots; this is the third)
+    # "usb-0:2.2:": "top",
+    # "usb-0:2.1:": "wrist",
+    # "usb-0:2.4:": "side",
 }
 
 #: What each camera is asked for.

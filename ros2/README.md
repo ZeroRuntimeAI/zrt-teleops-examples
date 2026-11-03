@@ -31,7 +31,7 @@ sudo apt install ros-jazzy-ros2-control ros-jazzy-ros2-controllers \
     ros-jazzy-xacro ros-jazzy-robot-state-publisher ros-dev-tools python3-venv
 python3 -m venv --system-site-packages ~/ros2-venv   # sees ROS's rclpy; conda/pyenv won't
 source ~/ros2-venv/bin/activate
-pip install "zeroruntime-teleops[ros2]"
+pip install -U "zeroruntime-teleops[ros2]"
 sudo usermod -aG dialout $USER                       # serial access; log out and back in
 ```
 

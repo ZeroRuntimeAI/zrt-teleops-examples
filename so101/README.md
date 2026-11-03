@@ -17,7 +17,7 @@ you already use LeRobot, nothing about your arms changes.
 ## Needs
 
 - Two SO-101 arms with their motor power supplies on. Cameras are optional.
-- Python 3.12+ and `pip install "zeroruntime-teleops[lerobot]"`.
+- Python 3.12+ and `pip install -U "zeroruntime-teleops[lerobot]"`.
 - A token and a room id: [root README, step 1](../README.md#1-get-a-token-and-a-room-id).
 - On Linux, serial access: `sudo usermod -aG dialout $USER`, then log out and in.
 

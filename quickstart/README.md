@@ -14,7 +14,7 @@ If this works, your token, room and network are ready for a real arm.
 
 ## Needs
 
-- Python 3.10+ and `pip install -r requirements.txt` from the repo root.
+- Python 3.10+ and `pip install -U -r requirements.txt` from the repo root.
 - A token and a room id: [root README, step 1](../README.md#1-get-a-token-and-a-room-id).
 
 ## Run
