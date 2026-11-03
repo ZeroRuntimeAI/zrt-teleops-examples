@@ -210,7 +210,14 @@ def parse_args() -> Settings:
 def resolve_checkpoint(spec: str, s: Settings) -> Path:
     """Find the policy: a ZeroRuntime training job, a local folder or a Hub repo."""
     if _is_uuid(spec):
-        from zeroruntime.teleops import Policy, PolicyError
+        try:
+            from zeroruntime.teleops import Policy, PolicyError
+        except ImportError:
+            from importlib.metadata import version
+            raise SystemExit(
+                f"--policy {spec} is a training job id, which needs zeroruntime-teleops "
+                f"with Policy (this is {version('zeroruntime-teleops')}). Upgrade it:\n"
+                f'    pip install -U "zeroruntime-teleops[lerobot]"') from None
         try:
             s.zr_policy = Policy.fetch(spec, token=s.token or None)
         except PolicyError as exc:

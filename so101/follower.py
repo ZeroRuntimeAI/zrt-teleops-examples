@@ -65,8 +65,24 @@ def find_cameras() -> dict:
 
 
 def _handle(d):
-    """An index on macOS, a by-path name on Linux."""
-    return int(d.name) if sys.platform == "darwin" else d.path
+    """What to OPEN the camera with: an index on macOS, /dev/videoN on Linux.
+
+    Not `d.path`. That is the /dev/v4l/by-path symlink, which is the right
+    thing to IDENTIFY a camera by -- it names the USB port, so it survives a
+    replug where /dev/videoN does not -- but some OpenCV builds, the Jetson's
+    among them, refuse to open a capture device by filename at all:
+
+        VIDEOIO(V4L2): backend is generally available but can't be used to
+        capture by name
+
+    Every camera then fails `works()`, the list comes back empty, and the
+    error blames the port names, which were fine. So: match on the symlink,
+    open what it points at.
+    """
+    if sys.platform == "darwin":
+        return int(d.name)
+    return os.path.realpath(d.path)
+
 
 
 # ── Settings ───────────────────────────────────────────────────────────────

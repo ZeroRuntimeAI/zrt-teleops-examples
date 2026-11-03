@@ -27,7 +27,7 @@ it and it works.
 
 ## Needs
 
--    pip install "zeroruntime-teleops[lerobot]>=0.1.2" "lerobot[smolvla]==0.6.1" python-dotenv opencv-python-headless
+- `pip install -U "zeroruntime-teleops[lerobot]" "lerobot[smolvla]==0.6.1" python-dotenv opencv-python-headless`
 - A room id and a token, the same on both hosts
 
 ```bash

@@ -37,9 +37,9 @@ ZERORUNTIME_TASK=pick up the cube
 
 Cameras are named by the USB port they're plugged into. Set this in
 `CAMERA_PORTS` at the top of `follower.py`. Those names become the dataset's
-camera keys. The commented-out examples there use pi0.5's own names
-(`base_0_rgb`, `left_wrist_0_rgb`, `right_wrist_0_rgb`). Uncomment them and set
-your ports, and a pi0.5 run needs no remapping. If the dict is left empty,
+camera keys. The commented-out examples there use `top`, `wrist` and `side`,
+the names the published dataset and SmolVLA checkpoint use. Uncomment them
+and set your ports. If the dict is left empty,
 cameras are named cam0, cam1… in the order they're found. If a listed camera
 is missing, the follower refuses to start, so it can't record views under the
 wrong names. `ls /dev/v4l/by-path` shows the ports.
