@@ -129,6 +129,39 @@ Set `ZERORUNTIME_PICKUP=1` in `.env`. `place` uses the same model. The first sta
 21.8 GB. On an M5 MacBook Pro (24 GB) it takes about 2 minutes to load and
 warm up, uses about 14 GB of memory, and plans 30 steps in about 1.3 s.
 
+## Real arm: camera-pointed pick-up
+
+`real_agent.py` is `agent.py` with `pick_up` and `place` from the Studio
+planner (`studio/agent/planner.py`), fed by the follower's fixed table camera
+instead of the simulator: Gemini points at the cube and the box top in one
+frame, a calibrated homography turns those pixels into table positions, and
+the planner's IK solves the waypoints on an arm model corrected from
+teleoperated grasps. The gripper's own reading says whether the cube is held;
+a miss is retried once from a fresh look.
+
+```bash
+pip install mujoco google-genai scipy
+export GOOGLE_API_KEY=...            # pointing calls Gemini directly
+python calibrate_table.py            # once; clear the table, the arm moves
+python sysid.py demos.json           # once; from teleoperated grasps (below)
+python real_agent.py
+```
+
+**Table calibration.** `calibrate_table.py` visits a grid of points at two
+heights, asks Gemini where the closed fingertips are in each frame, and fits
+`table_calibration.json`. Rerun it when the camera moves.
+
+**Arm correction.** The simulator's SO-101 is not your SO-101: on ours the
+model put the grasp point ~5 cm from where the jaws really close, mostly too
+high. Record 10+ teleoperated episodes of picking the cube from spots across
+the table (one grasp per episode, hold still 2 s once closed). `sysid.py`
+fits joint zero offsets and the grasp point inside the gripper so the model
+agrees with your grasps, reports the error left out of the fit, measures the
+box top from your releases, and writes `arm_correction.json`.
+
+The knobs are at the top of `table.py` (cube size, target name and height,
+reach box, pointing model) and `real_agent.py` (drop height, retries).
+
 ## Running both sides with demo.sh
 
 ```bash
