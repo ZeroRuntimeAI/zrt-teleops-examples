@@ -95,6 +95,11 @@ class Settings:
     check: bool = False
     verbose: bool = False
     zr_policy: object = None
+    jev: str = "off"
+    jev_hz: float = 1.0
+    max_s: float = 90.0
+    gate_tries: int = 3
+    log_chunks: bool = False
 
 
 def _is_uuid(spec: str) -> bool:
@@ -144,6 +149,21 @@ def parse_args() -> Settings:
                    "SO-101 order / name=value pairs [ZERORUNTIME_HOME, dataset]")
     p.add_argument("--home-speed", type=float, help="homing speed, units/s [30]")
     p.add_argument("--ramp-s", type=float, help="seconds to fade into the first chunk [1.5]")
+    p.add_argument("--jev", choices=["off", "shadow", "control", "gate", "steer"],
+                   help="Jev: 'shadow' watches and grades the episode (bare-policy baseline), "
+                        "'control' takes the arm over after a failed grasp, 'gate' rejects "
+                        "grasping chunks that would miss the cube and resamples, 'steer' moves a "
+                        "grasping chunk's grasp onto the cube Jev sees. See "
+                        "jev_supervisor.py, jev_gate.py [ZERORUNTIME_JEV, off]")
+    p.add_argument("--jev-hz", type=float, help="supervisor rate [1]")
+    p.add_argument("--max-s", type=float, help="with --jev: end the episode as a timeout after "
+                                               "this many seconds [90]")
+    p.add_argument("--log-chunks", action="store_true",
+                   help="write every chunk (raw, as queued) with its camera frames, and every "
+                        "step sent with the arm's reading, to logs/jev-<stamp>/chunks/. "
+                        "Works with --jev off; never changes what the arm does")
+    p.add_argument("--gate-tries", type=int, help="with --jev gate: samples per chunk before "
+                                                   "the last one is taken anyway [3]")
     p.add_argument("--check", action="store_true", help="load and infer only, no robot")
     p.add_argument("-v", "--verbose", action="store_true", help="per-chunk timing")
     a = p.parse_args()
@@ -188,6 +208,14 @@ def parse_args() -> Settings:
     if a.ramp_s is not None:
         s.ramp_s = a.ramp_s
     s.check, s.verbose = a.check, a.verbose
+    s.jev = a.jev or _env("ZERORUNTIME_JEV", "off")
+    if a.jev_hz:
+        s.jev_hz = a.jev_hz
+    if a.max_s:
+        s.max_s = a.max_s
+    if a.gate_tries:
+        s.gate_tries = a.gate_tries
+    s.log_chunks = a.log_chunks
 
     def need(value, flag, env, what):
         if not value:
@@ -541,6 +569,8 @@ def load_policy(s: Settings):
             cam_map[dst.removeprefix("observation.images.")] = \
                 src.removeprefix("observation.images.")
             cam_src = "train_config rename_map"
+    # The dataset's own camera names (top/wrist/side); the Jev questions use them.
+    view_name = {slot: cam_map.get(slot, slot) for slot in slots}
     if s.camera_map:
         cam_map, cam_src = dict(s.camera_map), "--camera-map"
     cam_map = {slot: cam_map.get(slot, slot) for slot in slots}
@@ -601,6 +631,7 @@ def load_policy(s: Settings):
 
     predict_chunk.home = home
     predict_chunk.labels = [cam_map[sl] for sl in slots]
+    predict_chunk.views = {view_name[sl]: cam_map[sl] for sl in slots}
     predict_chunk.num_steps = cfg.num_steps
     predict_chunk.hz = hz
     return predict_chunk
@@ -643,7 +674,79 @@ def _rgb(frame):
     return cv2.cvtColor(frame.array, cv2.COLOR_YUV2RGB_I420)
 
 
-def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
+class Control:
+    """What the policy thread shares with Jev (jev_supervisor.py, jev_gate.py).
+
+    `override` non-empty = Jev is driving: the policy's queue is dropped and
+    each step of `override` is sent instead, at the policy rate. `gen` goes up
+    on every takeover, so a chunk computed before it is thrown away. The first
+    chunk after a takeover starts from a held pose: no skip, faded in.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.override = []
+        self.gen = 0
+        self.fresh = False
+        self.chunks = []          # {"t", "ms"} per chunk that reached the queue
+        self.close_times = []     # monotonic time of each policy grasp (gripper cmd open -> closed)
+        self.gate = None          # option 2: gate.accept(images, joints, chunk) -> bool
+        self.gate_tries = 1
+        self.steer = None         # option 4: steer.steer(images, joints, chunk, t_obs) -> chunk
+        self.log = None           # --log-chunks: ChunkLog
+
+    def take_over(self, steps) -> None:
+        with self.lock:
+            self.override = list(steps)
+            self.gen += 1
+
+    @property
+    def driving(self) -> bool:
+        with self.lock:
+            return bool(self.override)
+
+
+class ChunkLog:
+    """--log-chunks: what the policy planned and what the arm did, for offline
+    analysis. chunks.jsonl: per chunk the observation's joints, the raw chunk,
+    the chunk after Jev's edit (steer), and what went into the queue (latency
+    steps skipped, blended); its camera frames as <n>-<label>.jpg.
+    steps.jsonl: per control step the command, what was sent after the speed
+    clamp, and the arm's reading at that moment."""
+
+    def __init__(self, log_dir: Path):
+        self.dir = log_dir / "chunks"
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.lock, self.n = threading.Lock(), 0
+        self.chunks = open(self.dir / "chunks.jsonl", "a")
+        self.steps = open(self.dir / "steps.jsonl", "a")
+
+    def chunk(self, images, joints, t_obs, ms, raw, final, queued, skipped) -> None:
+        import cv2
+        with self.lock:
+            n, self.n = self.n, self.n + 1
+        for label, rgb in images.items():
+            cv2.imwrite(str(self.dir / f"{n:04d}-{label}.jpg"), cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        r = lambda c: [{j: round(float(v), 2) for j, v in a.items()} for a in c]
+        row = {"n": n, "t_obs": time.time() - (time.monotonic() - t_obs), "ms": round(ms),
+               "joints": {j: round(float(v), 2) for j, v in joints.items()},
+               "raw": r(raw), "edited": final is not raw, "final": r(final) if final is not raw else None,
+               "skipped": skipped, "queued": r(queued)}
+        with self.lock:
+            self.chunks.write(json.dumps(row) + "\n")
+            self.chunks.flush()
+
+    def step(self, cmd, sent, measured, source) -> None:
+        row = {"t": time.time(), "src": source,
+               "cmd": {j: round(float(v), 2) for j, v in cmd.items()},
+               "sent": {j: round(float(v), 2) for j, v in sent.items()},
+               "arm": {j: round(float(v), 2) for j, v in measured.items()}}
+        with self.lock:
+            self.steps.write(json.dumps(row) + "\n")
+            self.steps.flush()
+
+
+def infer_forever(leader, predict_chunk, s: Settings, stop, ready, ctl: Control) -> None:
     """Play the current chunk while the next one is computed."""
     period = 1.0 / predict_chunk.hz
     limit = {j: v * period for j, v in s.max_speed.items()}
@@ -654,24 +757,38 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
     clipped, starved = [0], [0]
     warned = [0.0]
     seen, last_wait = None, 0.0
+    grip_open = [False]
 
-    def run(images, joints, t_obs):
+    def run(images, joints, t_obs, gen, fresh):
         try:
-            acts = predict_chunk(images, joints)
+            # Option 2: a grasping chunk Jev rejects is thrown away and sampled
+            # again (fresh noise); the old queue keeps playing meanwhile.
+            for _ in range(ctl.gate_tries):
+                acts = predict_chunk(images, joints)
+                if not acts or ctl.gate is None or ctl.gate.accept(images, joints, acts):
+                    break
             if not acts:
                 return
+            raw = acts
+            if ctl.steer is not None:
+                acts = ctl.steer.steer(images, joints, acts, t_obs)
             dt = time.monotonic() - t_obs
+            with ctl.lock:
+                if ctl.gen != gen:
+                    return          # Jev took the arm while this was computing
+                ctl.chunks.append({"t": time.time(), "ms": round(dt * 1e3)})
             lat[0] = dt if lat[0] is None else 0.7 * lat[0] + 0.3 * dt
             chunk_len[0] = len(acts)
             chunk_s = len(acts) * period
-            new = acts[int(round(dt / period)):]
+            # After a takeover the arm held still while this ran: nothing to skip.
+            new = list(acts) if fresh else acts[int(round(dt / period)):]
             with lock:
                 old = queue[:]
                 n = min(s.blend_steps, len(old), len(new))
                 for k in range(n):
                     w = (k + 1) / (n + 1)
                     new[k] = {j: (1 - w) * old[k][j] + w * new[k][j] for j in new[k]}
-                if not ready.is_set():
+                if not ready.is_set() or fresh:
                     # Fade the first chunk in from the held pose.
                     base = leader.read_joints()
                     n = min(int(round(s.ramp_s / period)), len(new))
@@ -681,6 +798,8 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
                         new[k] = {j: (1 - w) * base[j] + w * v for j, v in new[k].items()}
                 if new:
                     queue[:] = new
+            if ctl.log is not None:
+                ctl.log.chunk(images, joints, t_obs, dt * 1e3, raw, acts, new, len(acts) - len(new))
             thr = prefetch_threshold(s, chunk_s, lat[0], period)
             if s.verbose or not ready.is_set():
                 print(f"  chunk {dt * 1e3:5.0f} ms  skipped {len(acts) - len(new):2d}  "
@@ -707,11 +826,18 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
 
     due = time.monotonic()
     while not stop.is_set():
+        with ctl.lock:
+            ov = ctl.override.pop(0) if ctl.override else None
+            if ov is not None and not ctl.override:
+                ctl.fresh = True    # Jev is done: the next chunk starts from here
+        if ov is not None:
+            with lock:
+                queue.clear()
         with lock:
             left = len(queue)
         due_now = (chunk_len[0] is None or left * period
                    <= prefetch_threshold(s, chunk_len[0] * period, lat[0], period))
-        if not busy.is_set() and due_now:
+        if ov is None and not busy.is_set() and due_now:
             obs = leader.observation()
             try:
                 labels = set(obs.images)
@@ -730,15 +856,28 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
                 for f in obs.images.values():
                     f.release()
             if images:
+                with ctl.lock:
+                    gen, fresh, ctl.fresh = ctl.gen, ctl.fresh, False
                 busy.set()
-                threading.Thread(target=run, args=(images, joints, time.monotonic()),
+                threading.Thread(target=run, args=(images, joints, time.monotonic(), gen, fresh),
                                  name="chunk", daemon=True).start()
             elif time.monotonic() - last_wait > 5:
                 last_wait = time.monotonic()
                 print("  waiting for video...", flush=True)
 
-        with lock:
-            step = queue.pop(0) if queue else None
+        if ov is not None:
+            step = ov
+        else:
+            with lock:
+                step = queue.pop(0) if queue else None
+            if step:
+                g = step.get("gripper", 0.0)
+                if g > 20.0:
+                    grip_open[0] = True
+                elif g < 15.0:
+                    if grip_open[0]:
+                        ctl.close_times.append(time.monotonic())
+                    grip_open[0] = False
         if step:
             safe, cur = {}, leader.read_joints()
             for j, v in step.items():
@@ -748,6 +887,8 @@ def infer_forever(leader, predict_chunk, s: Settings, stop, ready) -> None:
                     d, clipped[0] = (lim if d > 0 else -lim), clipped[0] + 1
                 safe[j] = cur.get(j, v) + d
             leader.set_action(safe)
+            if ctl.log is not None:
+                ctl.log.step(step, safe, cur, "jev" if ov is not None else "policy")
             ready.set()
         elif ready.is_set():
             starved[0] += 1
@@ -782,6 +923,11 @@ def check(predict_chunk, s: Settings) -> None:
         assert all(np.isfinite(list(a.values())).all() for a in acts), "non-finite action"
         print(f"  chunk {i}  {times[-1] * 1e3:7.0f} ms" + ("   (warm-up)" if i == 0 else "")
               + "   first: " + "  ".join(f"{j}={acts[0][j]:+.1f}" for j in JOINTS))
+
+    import torch
+    if torch.cuda.is_available():
+        print(f"  gpu mem  peak {torch.cuda.max_memory_reserved() / 2**30:.2f} GiB held by torch "
+              f"(nvidia-smi adds ~0.3-0.5 GiB of CUDA context)")
 
     took = float(np.median(times[1:]))
     period = 1.0 / predict_chunk.hz
@@ -833,7 +979,8 @@ def drive(predict_chunk, s: Settings) -> None:
 
     leader.start()
     stop, ready = threading.Event(), threading.Event()
-    worker = None
+    ctl = Control()
+    worker = sup = None
     try:
         if not leader.claim_control(timeout_s=10):
             raise SystemExit(f"no control: no follower answered in {s.meeting_id}\n"
@@ -865,12 +1012,29 @@ def drive(predict_chunk, s: Settings) -> None:
         def start_policy():
             nonlocal worker
             worker = threading.Thread(target=infer_forever,
-                                      args=(leader, predict_chunk, s, stop, ready),
+                                      args=(leader, predict_chunk, s, stop, ready, ctl),
                                       name="inference", daemon=True)
             worker.start()
 
         # Video only flows while the deadman is held.
         leader.hold_deadman(True)
+        log_dir = HERE / "logs" / time.strftime("jev-%Y%m%d-%H%M%S")
+        if s.log_chunks:
+            ctl.log = ChunkLog(log_dir)
+            print(f"  logging every chunk and step to {ctl.log.dir}", flush=True)
+        if s.jev != "off":
+            from jev_supervisor import JevSupervisor
+            if s.jev == "gate":
+                from jev_gate import ChunkGate
+                ctl.gate = ChunkGate(predict_chunk.views["top"], log_dir)
+                ctl.gate_tries = s.gate_tries
+            elif s.jev == "steer":
+                from jev_gate import ChunkSteer
+                ctl.steer = ChunkSteer(predict_chunk.views["top"], log_dir, predict_chunk.hz, ctl)
+            sup = JevSupervisor(leader, stop, ready, ctl, views=predict_chunk.views,
+                                home=predict_chunk.home or start, policy_hz=predict_chunk.hz,
+                                mode=s.jev, max_s=s.max_s, log_dir=log_dir, hz=s.jev_hz)
+            sup.start()
         if dur:
             print(f"homing: {dist:.0f} units on the farthest joint, {dur:.1f}s "
                   f"(keep the workspace clear)", flush=True)
@@ -909,6 +1073,9 @@ def drive(predict_chunk, s: Settings) -> None:
                       f"{leader.robot_safe_state}", flush=True)
             if worker is not None and not worker.is_alive():
                 raise SystemExit("the inference thread died -- see above")
+            if sup is not None and sup.reason:
+                print(f"jev ended the episode: {sup.reason}", flush=True)
+                break
     except KeyboardInterrupt:
         pass
     finally:
@@ -922,6 +1089,8 @@ def drive(predict_chunk, s: Settings) -> None:
         finally:
             if worker is not None:
                 worker.join(timeout=2.0)
+            if sup is not None:
+                sup.finish()
             leader.stop()
 
 

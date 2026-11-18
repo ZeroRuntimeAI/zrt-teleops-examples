@@ -1,0 +1,20 @@
+{
+ "about": "top-camera pixel (640x480, centre of Jev's Box for the cube) -> table xy (m) in the arm's FK frame (sysid-corrected). Fitted 2026-11-06 from 39 training episodes: Jev box on the first top frame vs where the jaws shut. Leave-one-out error median 1.5 cm. Valid while the top camera matches the training view (camalign.py).",
+ "H": [
+  [
+   -0.0020357087082212406,
+   -0.004052885201648869,
+   1.0460241264368157
+  ],
+  [
+   -0.0006720313531330241,
+   0.001551201460179535,
+   -0.21802330554433233
+  ],
+  [
+   -0.00984410801213702,
+   -0.004940214278077744,
+   1.0
+  ]
+ ]
+}
